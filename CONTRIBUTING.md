@@ -1,6 +1,6 @@
 # 贡献指南
 
-本指南是人类贡献者的入口；AI 代理执行时同时遵循仓库级 [AGENTS.md](AGENTS.md)。规则冲突时按以下优先级处理：用户明确要求 → `AGENTS.md` → 当前 OpenSpec change artifacts → 已同步的 main specs → `docs/` 计划与设计文档 → 本指南。当前治理 change 为 [`initialize-project-governance`](openspec/changes/initialize-project-governance/)，其 delta spec 位于 [`spec.md`](openspec/changes/initialize-project-governance/specs/development-governance/spec.md)；同步后生成的权威 main spec 预期为 [`openspec/specs/development-governance/spec.md`](openspec/specs/development-governance/spec.md)，在文件生成前不要伪造链接目标或状态。
+本指南是人类贡献者的入口；AI 代理执行时同时遵循仓库级 [AGENTS.md](AGENTS.md)。规则冲突时按以下优先级处理：用户明确要求 → `AGENTS.md` → 已归档的治理 change artifacts → 已同步的 main specs → `docs/` 计划与设计文档 → 本指南。已归档的治理 change 为 [`initialize-project-governance`](openspec/changes/archive/2026-08-13-initialize-project-governance/)，其 delta spec 位于 [`spec.md`](openspec/changes/archive/2026-08-13-initialize-project-governance/specs/development-governance/spec.md)；同步后生成的权威 main spec 预期为 [`openspec/specs/development-governance/spec.md`](openspec/specs/development-governance/spec.md)，在文件生成前不要伪造链接目标或状态。
 
 ## OpenSpec 工作流
 
