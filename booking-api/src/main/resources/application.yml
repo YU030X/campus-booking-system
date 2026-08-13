@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: booking-api
+  jackson:
+    time-zone: Asia/Shanghai
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+server:
+  port: 8080
