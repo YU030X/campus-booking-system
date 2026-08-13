@@ -1,10 +1,4 @@
-# Application Foundation Specification
-
-## Purpose
-
-Defines the runnable backend and buildable frontend shell, with safe configuration defaults, as the project's implementation foundation.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Backend foundation is runnable
 The backend MUST target JDK 17, use Spring Boot 3.5.x, package code as `com.yu030x.booking`, and contain only entrypoint plus `common.api`, `common.exception`, and `common.config` in T01 and this foundation change. T01 and foundation backend paths are restricted to `booking-api/pom.xml`, `booking-api/src/main/java/com/yu030x/booking/**`, `booking-api/src/main/resources/application.yml`, and `booking-api/src/test/java/com/yu030x/booking/**`; no business directories, entities, mappers, or seed modules are allowed. The runtime MUST expose a health endpoint that remains accessible without authentication while all non-health future API paths remain protected by default security behavior.
