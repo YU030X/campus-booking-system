@@ -3,6 +3,33 @@ spring:
     name: booking-api
   jackson:
     time-zone: Asia/Shanghai
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    data-source-properties:
+      serverTimezone: Asia/Shanghai
+      characterEncoding: UTF-8
+  sql:
+    init:
+      mode: never
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+booking:
+  security:
+    jwt-secret: ${JWT_SECRET:}
+springdoc:
+  api-docs:
+    enabled: ${SPRINGDOC_ENABLED:false}
+  swagger-ui:
+    enabled: ${SPRINGDOC_ENABLED:false}
 management:
   endpoints:
     web:
