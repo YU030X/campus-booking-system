@@ -9,12 +9,14 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationContext;
+import org.springframework.core.env.Environment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(classes = BookingApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,org.mybatis.spring.boot.autoconfigure.MybatisPlusAutoConfiguration",
+                "booking.security.jwt-secret=",
                 "springdoc.api-docs.enabled=false",
                 "springdoc.swagger-ui.enabled=false"
         })
@@ -22,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SecurityContextIntegrationTest {
     @Autowired TestRestTemplate rest;
     @Autowired ApplicationContext context;
+    @Autowired Environment environment;
 
     @Test
     void healthIsPublicAndOtherRoutesAreDenied() {
@@ -38,9 +41,10 @@ class SecurityContextIntegrationTest {
     }
 
     @Test
-    void startupDoesNotLogGeneratedPasswordOrSecrets(CapturedOutput output) {
-        assertThat(System.getenv("JWT_SECRET")).isNull();
+    void startupDoesNotRequireOrLogSecrets(CapturedOutput output) {
+        assertThat(environment.getProperty("booking.security.jwt-secret")).isEmpty();
         assertThat(output.getOut()).doesNotContain("Using generated security password");
         assertThat(output.getOut()).doesNotContain("JWT_SECRET");
+        assertThat(output.getOut()).doesNotContain("jwt-secret");
     }
 }
