@@ -1,0 +1,1 @@
+package com.yu030x.booking.common.api; public final class BookingConstants { private BookingConstants(){} public static final int SLOT_MINUTES=30; public static final BookingStatus DIRECT_STATUS=BookingStatus.CONFIRMED; }
