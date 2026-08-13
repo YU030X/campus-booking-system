@@ -20,4 +20,4 @@
 - [x] Run `openspec validate add-identity-access --type change --strict`.
 - [x] Use the `openspec-sync-specs` workflow (CLI has no `openspec sync`) to semantically sync the identity delta into `openspec/specs/identity-access/spec.md`, then validate main specs with `openspec validate --specs --strict`.
 - [x] Archive the completed change.
-- [ ] Finish the Draft PR workflow with dependency, rollback, and real联调 evidence.
+- [x] Finish the Draft PR workflow with dependency, rollback, and real联调 evidence.
