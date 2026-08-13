@@ -1,0 +1,36 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Spring Boot 3.5 + MySQL 8.0 + Redis + Vue 3/Element Plus, with Maven and npm.
+  Domain: campus rooms, equipment, and facilities booking; booking_slot uses 30-minute
+  slots and a database unique constraint for concurrency correctness.
+  P0 constraints: preserve the frozen database/API/domain/frontend contracts; never weaken
+  uniqueness, authorization, validation, or security controls to make checks pass. Keep
+  MySQL and Redis private and do not commit secrets, real .env files, or generated artifacts.
+  Repository layout: booking-api/, booking-web/, sql/, deploy/, docs/, and openspec/.
+  Engineering rules: controllers expose HTTP, services own business transactions, mappers
+  own persistence; keep Entity, DTO, and VO separate; use four spaces in Java and two in
+  Vue/JS/YAML/JSON. Validate with the narrowest relevant tests/build plus git diff --check.
+
+rules:
+  proposal:
+    - State the user-visible problem and why now; list concrete changes, capabilities, impact, and explicit non-goals.
+    - Keep one proposal mapped to one change/PR and preserve the project's frozen contracts unless a new change explicitly revises them.
+  specs:
+    - Describe observable behavior with normative MUST/SHALL requirements and at least one WHEN/THEN scenario per requirement.
+    - Treat concurrency, authorization, state transitions, slot release, and security boundaries as testable contracts; do not prescribe implementation details.
+    - For delta specs, use exact capability paths and preserve complete MODIFIED requirement blocks; sync to main specs semantically, never by file replacement.
+  tasks:
+    - Make tasks small, ordered by dependency, and include concrete validation commands and stop conditions; never claim checks were run without evidence.
+    - Respect single-writer ownership and permitted paths recorded in the repository task card.
+
+operations:
+  apply:
+    guidance:
+      - Read proposal, specs, design, and tasks before editing; implement only approved tasks and permitted paths, updating task progress with truthful evidence.
+      - Run relevant tests/builds and git diff --check. After implementation, use the openspec-sync-specs workflow to semantically merge finalized deltas into main specs, then validate specs before archive.
+      - Stop and report when a contract is unclear, a shared-file boundary would be crossed, or validation fails; do not silently broaden scope.
+  archive:
+    guidance:
+      - Archive only after all tasks, implementation checks, finalized delta sync, and main-spec validation are complete; keep the change active when any prerequisite is missing.
+      - Record actual commands/results, remaining risks, and rollback notes. Do not overwrite main specs with delta files and do not mark unrun checks as passed.
