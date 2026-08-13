@@ -1,0 +1,3 @@
+package com.yu030x.booking;
+import com.yu030x.booking.common.api.*; import org.junit.jupiter.api.Test; import static org.junit.jupiter.api.Assertions.*;
+class ContractsTest { @Test void contracts(){ assertEquals(0,Result.success("x").code()); assertEquals("success",Result.success("x").message()); assertThrows(IllegalArgumentException.class,()->new PageResult<>(1,101,0,java.util.List.of())); assertTrue(BookingStatus.PENDING_APPROVAL.canTransitionTo(BookingStatus.CONFIRMED)); assertFalse(BookingStatus.COMPLETED.canTransitionTo(BookingStatus.CANCELLED)); assertEquals(BookingStatus.CONFIRMED,BookingConstants.DIRECT_STATUS); assertArrayEquals(new Role[]{Role.STUDENT,Role.ADMIN},Role.values()); } }
