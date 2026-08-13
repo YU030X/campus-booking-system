@@ -17,4 +17,4 @@
 - [x] 3.3c Verify `git status --short` contains only this change's artifacts/code paths.
 - [x] 3.3d Sync delta specs to the corresponding main specs and verify the main specs are fully synced.
 - [x] 3.3e Archive the completed change under `openspec/changes/archive/2026-08-13-extend-backend-data-security-foundation`.
-- [ ] 3.3f Open a Draft PR after archive completion.
+- [x] 3.3f Open a Draft PR after archive completion.
