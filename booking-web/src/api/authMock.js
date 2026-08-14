@@ -27,22 +27,35 @@ const decodeTokenPart = (value) => {
     return String.fromCodePoint(...codePoints);
   } catch { return null; }
 };
+const TOKEN_DOMAIN = 'campus-auth-mock-v1';
+const tokenChecksum = (value) => {
+  let hash = 0x811c9dc5;
+  for (const character of value) {
+    hash ^= character.codePointAt(0);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+};
 const issueToken = (account) => {
   const expiresAt = Date.now() + 7200000;
-  const token = `mock-token-${encodeTokenPart(account.username)}-${expiresAt}`;
+  const encodedUsername = encodeTokenPart(account.username);
+  const signature = tokenChecksum(`${encodedUsername}|${expiresAt}|${TOKEN_DOMAIN}`);
+  const token = `mock-token-${encodedUsername}-${expiresAt}-${signature}`;
   tokens.set(token, { account, expiresAt });
   return { token, expiresAt };
 };
 const resolveToken = (token) => {
   const existing = tokens.get(token);
   if (existing) return existing;
-  const match = /^mock-token-(.+)-(\d+)$/.exec(token);
+  const match = /^mock-token-(.+)-(\d+)-([0-9a-f]{8})$/.exec(token);
   if (!match) return null;
   const decoded = decodeTokenPart(match[1]);
   if (decoded === null) return null;
   const account = accounts.get(decoded);
   if (!account) return null;
-  const record = { account, expiresAt: Number(match[2]) };
+  const expiresAt = Number(match[2]);
+  if (!Number.isSafeInteger(expiresAt) || tokenChecksum(`${match[1]}|${expiresAt}|${TOKEN_DOMAIN}`) !== match[3].toLowerCase()) return null;
+  const record = { account, expiresAt };
   tokens.set(token, record);
   return record;
 };
