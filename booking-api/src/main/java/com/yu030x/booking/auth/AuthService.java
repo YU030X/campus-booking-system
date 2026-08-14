@@ -12,7 +12,7 @@ import com.yu030x.booking.user.UserView;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -24,7 +24,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@ConditionalOnBean(UserMapper.class)
+@ConditionalOnProperty(prefix = "booking.identity", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class AuthService {
     private static final String LOGIN_FAILED = "账号或密码错误";
 
