@@ -3,7 +3,7 @@ package com.yu030x.booking.user;
 import com.yu030x.booking.auth.security.BookingPrincipalAccessor;
 import com.yu030x.booking.common.api.Result;
 import jakarta.validation.Valid;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/v1/users/me")
-@ConditionalOnBean(UserMapper.class)
+@ConditionalOnProperty(prefix = "booking.identity", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class UserController {
     private final UserService userService;
     private final BookingPrincipalAccessor principalAccessor;
