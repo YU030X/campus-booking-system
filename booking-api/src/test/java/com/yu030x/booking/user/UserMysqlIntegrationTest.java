@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.yu030x.booking.auth.AuthService;
-import com.yu030x.booking.auth.AuthServiceTestFactory;
 import com.yu030x.booking.auth.RegisterRequest;
 import com.yu030x.booking.BookingApplication;
 import com.yu030x.booking.auth.security.BookingPrincipal;
@@ -16,8 +15,6 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
-import java.time.Clock;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -32,8 +29,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -42,7 +37,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * production application configuration supplies the MySQL driver; this test
  * deliberately fails when the enabled target is not MySQL 8 or newer.
  */
-@SpringBootTest(classes = {BookingApplication.class, UserMysqlIntegrationTest.TestBeans.class}, properties = {
+@SpringBootTest(classes = BookingApplication.class, properties = {
+        "booking.identity.enabled=true",
         "booking.security.jwt-secret=0123456789abcdef0123456789abcdef",
         "springdoc.api-docs.enabled=false",
         "springdoc.swagger-ui.enabled=false"
@@ -282,21 +278,4 @@ class UserMysqlIntegrationTest {
     private record UserDefaults(String role, int creditScore, int status, int deleted) {
     }
 
-    @TestConfiguration(proxyBeanMethods = false)
-    static class TestBeans {
-        @Bean
-        Clock jwtClock() {
-            return Clock.system(ZoneId.of("Asia/Shanghai"));
-        }
-
-        @Bean
-        AuthService authService(UserMapper userMapper, Clock jwtClock) {
-            return AuthServiceTestFactory.create(userMapper, jwtClock);
-        }
-
-        @Bean
-        UserService userService(UserMapper userMapper, Clock jwtClock) {
-            return new UserService(userMapper, jwtClock);
-        }
-    }
 }
