@@ -54,3 +54,6 @@ reports/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Business docs (removed from history)
+docs/
