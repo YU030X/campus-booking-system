@@ -44,6 +44,6 @@
 ## Acceptance evidence (2026-08-25)
 
 - After final scope review fixes, the hidden PowerShell 7 harness completed a fresh real MySQL 8.0.40, Java 17.0.20, built API/proxy, and headless Chromium run successfully.
-- Browser result: `1 passed`, 11 screenshots, summary `PASS`, and `T05_RESOURCE_PASS.marker` present.
-- Acceptance covered student filters/empty state/forbidden state, admin category and resource creation, status `1 -> 2 -> 1` with filter and pagination preservation, rule invalid/valid/empty/restore flows, global/resource closures with duplicate conflict and returned-id deletion, filtered student detail, `/resources/0` negative handling, and forbidden network calls.
+- Browser result: `1 passed`, 12 screenshots, summary `PASS`, and `T05_RESOURCE_PASS.marker` present.
+- Acceptance covered student filters/empty state/forbidden state, admin category and resource creation, status `1 -> 2 -> 1` with filter and pagination preservation, rule invalid/valid/empty/restore flows, global/resource closures with duplicate conflict and returned-id deletion, filtered student detail, server-returned 404 not-found handling, `/resources/0` negative handling, and forbidden network calls.
 - Cleanup verified no T05 acceptance processes, no generated MySQL data directory, and no harness listener remained; temporary credentials are not recorded here.
