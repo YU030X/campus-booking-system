@@ -32,7 +32,9 @@ import { useResourceCatalogStore } from '../../stores/resourceCatalog';
 const route = useRoute();
 const store = useResourceCatalogStore();
 const id = computed(() => String(route.params.id ?? ''));
-const notFound = computed(() => id.value === '0' || !id.value);
+const requestNotFound = computed(() => store.detail.status === 'error'
+  && (store.detail.error?.code === 40400 || store.detail.error?.response?.status === 404));
+const notFound = computed(() => id.value === '0' || !id.value || requestNotFound.value);
 const resource = computed(() => store.detail.data);
 const loading = computed(() => !notFound.value && store.detail.status === 'loading');
 const error = computed(() => !notFound.value && store.detail.status === 'error');
