@@ -4,20 +4,26 @@ import { useAuthStore, safeRedirect } from '../stores/auth';
 import { installAuthHandlers } from '../api/http';
 import Login from '../views/auth/Login.vue';
 import Register from '../views/auth/Register.vue';
+import ResourceList from '../views/resources/List.vue';
+import ResourceDetail from '../views/resources/Detail.vue';
+import Categories from '../views/admin/categories/Index.vue';
+import AdminResources from '../views/admin/resources/Index.vue';
+import Rules from '../views/admin/rules/Index.vue';
+import Closures from '../views/admin/closures/Index.vue';
 
 const Placeholder = (title) => ({ render: () => h('section', [h('h2', title), h('p', 'Feature page placeholder')]) });
 const studentRoles = ['STUDENT', 'ADMIN'];
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
   { path: '/register', component: Register, meta: { public: true } },
-  { path: '/resources', component: Placeholder('Resources'), meta: { roles: studentRoles } },
-  { path: '/resources/:id', component: Placeholder('Resource detail'), meta: { roles: studentRoles } },
+  { path: '/resources', component: ResourceList, meta: { roles: studentRoles } },
+  { path: '/resources/:id', component: ResourceDetail, meta: { roles: studentRoles } },
   { path: '/bookings', component: Placeholder('Bookings'), meta: { roles: studentRoles } },
   { path: '/bookings/:id', component: Placeholder('Booking detail'), meta: { roles: studentRoles } },
-  { path: '/admin/categories', component: Placeholder('Admin categories'), meta: { roles: ['ADMIN'] } },
-  { path: '/admin/resources', component: Placeholder('Admin resources'), meta: { roles: ['ADMIN'] } },
-  { path: '/admin/rules', component: Placeholder('Admin rules'), meta: { roles: ['ADMIN'] } },
-  { path: '/admin/closures', component: Placeholder('Admin closures'), meta: { roles: ['ADMIN'] } },
+  { path: '/admin/categories', component: Categories, meta: { roles: ['ADMIN'] } },
+  { path: '/admin/resources', component: AdminResources, meta: { roles: ['ADMIN'] } },
+  { path: '/admin/rules', component: Rules, meta: { roles: ['ADMIN'] } },
+  { path: '/admin/closures', component: Closures, meta: { roles: ['ADMIN'] } },
   { path: '/admin/approvals', component: Placeholder('Admin approvals'), meta: { roles: ['ADMIN'] } },
   { path: '/admin/users', component: Placeholder('Admin users'), meta: { roles: ['ADMIN'] } },
 ];
