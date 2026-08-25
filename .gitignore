@@ -2,6 +2,7 @@
 .agents/
 .claude/
 .cursor/
+.pi/
 CLAUDE.md
 
 # Java / Maven / Gradle
@@ -57,3 +58,5 @@ Desktop.ini
 
 # Business docs (removed from history)
 docs/
+
+handoff.md
