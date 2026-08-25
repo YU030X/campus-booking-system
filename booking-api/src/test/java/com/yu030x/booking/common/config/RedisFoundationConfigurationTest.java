@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -42,9 +43,11 @@ class RedisFoundationConfigurationTest {
     }
 
     @Test
-    void validEnabledModeCreatesExactlyOneSharedFoundationAndClosesRedisson() {
+    void validEnabledModeCreatesExactlyOneSharedFoundationAndClosesClients() {
         RedissonClient client = mock(RedissonClient.class);
         RedisClientFactory factory = properties -> client;
+        AtomicReference<org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory> connectionFactory =
+                new AtomicReference<>();
 
         runner.withPropertyValues(
                         "booking.redis.enabled=true",
@@ -57,12 +60,16 @@ class RedisFoundationConfigurationTest {
                     assertThat(context).hasSingleBean(RedissonClient.class);
                     assertThat(context).hasSingleBean(RedisConnectionFactory.class);
                     assertThat(context).hasSingleBean(RedisTemplate.class);
+                    connectionFactory.set(context.getBean(
+                            org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory.class));
+                    assertThat(connectionFactory.get().isRunning()).isTrue();
                     RedisProperties properties = context.getBean(RedisProperties.class);
                     assertThat(properties.getPassword()).isEqualTo("secret-value");
                     assertThat(properties.getDatabase()).isZero();
                 });
 
         verify(client).shutdown();
+        assertThat(connectionFactory.get().isRunning()).isFalse();
     }
 
     @Test
@@ -139,7 +146,7 @@ class RedisFoundationConfigurationTest {
                     RedisTemplate<String, String> template = context.getBean(RedisTemplate.class);
                     assertThat(template.getKeySerializer()).isInstanceOf(StringRedisSerializer.class);
                     assertThat(template.getValueSerializer()).isInstanceOf(StringRedisSerializer.class);
-                    String json = "{\"type\":\"booking\",\"value\":1}";
+                    String json = "{\"@class\":\"java.lang.Runtime\",\"value\":1}";
                     @SuppressWarnings("unchecked")
                     org.springframework.data.redis.serializer.RedisSerializer<String> serializer =
                             (org.springframework.data.redis.serializer.RedisSerializer<String>) template.getValueSerializer();
@@ -175,6 +182,7 @@ class RedisFoundationConfigurationTest {
         String address = configuration.redissonAddress(properties);
         assertThat(address).isEqualTo("redis://redis.internal:6380");
         assertThat(address).doesNotContain("secret-value", "booking_slot", "cache");
+        assertThat(redissonConfig.getCodec()).isSameAs(org.redisson.client.codec.StringCodec.INSTANCE);
         assertThat(redissonConfig.getLockWatchdogTimeout()).isEqualTo(30000L);
     }
 }

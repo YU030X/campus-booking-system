@@ -5,6 +5,7 @@ import io.lettuce.core.SocketOptions;
 import java.time.Duration;
 import org.redisson.Redisson;
 import org.redisson.api.RedissonClient;
+import org.redisson.client.codec.StringCodec;
 import org.redisson.config.Config;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -34,6 +35,7 @@ public class RedisFoundationConfiguration {
 
     Config createRedissonConfig(RedisProperties properties) {
         Config config = new Config();
+        config.setCodec(StringCodec.INSTANCE);
         var server = config.useSingleServer()
                 .setAddress(redissonAddress(properties))
                 .setDatabase(properties.getDatabase())

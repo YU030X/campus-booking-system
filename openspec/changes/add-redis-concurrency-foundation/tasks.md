@@ -31,3 +31,13 @@
 - [x] 5.3 Run `openspec validate add-redis-concurrency-foundation --type change --strict --no-interactive` and `git diff --check`; audit `git status --short` to ensure only the explicitly allowed files and OpenSpec artifacts changed.
 - [x] 5.4 Before handoff, confirm no implementation work has expanded into booking/resource/availability/cache/support/frontend/sql/deploy paths and leave T07/T12 business lock/cache behavior for their own changes.
 - [x] 5.5 Start the root Compose stack with a temporary password, verify both health checks and loopback-only port publication, rerun the real-Redis smoke test and `mvn verify`, then stop/remove the verification containers and rerun strict OpenSpec validation plus `git diff --check`.
+
+## Acceptance evidence
+
+- `mvn dependency:tree` → BUILD SUCCESS; Boot-managed `spring-boot-starter-data-redis:3.5.4`, direct `org.redisson:redisson:4.6.1`, no Redisson starter or Flyway.
+- `mvn -Dtest=RedisFoundationConfigurationTest,ApplicationConfigurationStaticTest test` → 19 tests, 0 failures/errors/skips.
+- With root Compose healthy and `REDIS_HOST=127.0.0.1`, `mvn -Dtest=RedisRealIntegrationTest test` → 1 test, 0 failures/errors/skips; full application startup, health, String RedisTemplate/Redisson round trips, watchdog-compatible lock, and shutdown assertions passed.
+- With temporary MySQL/Redis/JWT environment values, `mvn verify` → 91 tests, 0 failures/errors/skips, BUILD SUCCESS.
+- Root Compose health checks → MySQL and Redis healthy; published bindings verified as `127.0.0.1:3306` and `127.0.0.1:6379`; `docker compose down` removed containers/network and left no listeners.
+- `openspec validate --specs` → 11 passed, 0 failed; `openspec validate add-redis-concurrency-foundation --type change --strict --no-interactive` → valid.
+- `git diff --check` → passed.
