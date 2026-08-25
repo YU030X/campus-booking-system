@@ -6,9 +6,9 @@
 
 ## 2. Booking contracts and persistence boundary
 
-- [ ] 2.1 Add the booking-owned request/response models for `CreateBookingRequest` and the exact `BookingView` field set, including unknown-field rejection, decimal-string resource ID, purpose trim/Unicode-code-point limit, attendee count, Shanghai time format, Long-as-string serialization, and nullable values.
-- [ ] 2.2 Add booking and `booking_slot` entities, mappers, and XML under the booking package against the frozen DDL/indexes; preserve `uk_resource_slot`, physical slot deletion semantics, and booking logical-delete filtering without changing SQL migrations.
-- [ ] 2.3 Add the pure `[start,end)` 30-minute slot splitter and reject cross-day, non-`:00`/`:30`, nonzero-second/nanosecond, empty, or reversed intervals before it is called; keep the function independent enough for deterministic unit tests.
+- [x] 2.1 Add the booking-owned request/response models for `CreateBookingRequest` and the exact `BookingView` field set, including unknown-field rejection, decimal-string resource ID, purpose trim/Unicode-code-point limit, attendee count, Shanghai time format, Long-as-string serialization, and nullable values.
+- [ ] 2.2 Add booking and `booking_slot` entities plus annotation-based mappers under the booking package against the frozen DDL/indexes; follow the repository's existing inline MyBatis SQL style, add no mapper XML resource, preserve `uk_resource_slot`, physical slot deletion semantics, and booking logical-delete filtering without changing SQL migrations.
+- [x] 2.3 Add the pure `[start,end)` 30-minute slot splitter and reject cross-day, non-`:00`/`:30`, nonzero-second/nanosecond, empty, or reversed intervals before it is called; keep the function independent enough for deterministic unit tests.
 
 ## 3. API and ordered business validation
 

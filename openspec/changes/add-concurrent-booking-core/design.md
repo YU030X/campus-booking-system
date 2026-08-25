@@ -25,7 +25,7 @@ Two repository facts are preconditions rather than implementation work: reviewed
 
 ### 1. Keep one booking capability inside the T07 ownership fence
 
-Implement controller, DTO, VO, entity, mapper/XML, service, model, and support types only below `com.yu030x.booking.booking`, with tests below the matching booking test tree. Existing identity and resource services/mappers are read-only collaborators. This avoids modifying shared files and keeps SQL ownership with T01. A booking mapper may read the frozen resource/user/rule/closure/blacklist data through already-merged contracts, but must not create availability rows or change catalog behavior.
+Implement controller, DTO, VO, entity, annotation-based mapper, service, model, and support types only below `com.yu030x.booking.booking`, with tests below the matching booking test tree. Existing identity and resource services/mappers are read-only collaborators. Use the repository's established inline MyBatis annotation style; do not add mapper XML under `src/main/resources/**` because that would expand the approved ownership paths. This avoids modifying shared files and keeps SQL ownership with T01. A booking mapper may read the frozen resource/user/rule/closure/blacklist data through already-merged contracts, but must not create availability rows or change catalog behavior.
 
 ### 2. Split lock coordination from the transaction bean
 
@@ -69,7 +69,7 @@ The planning artifacts record a precondition/request to T01: the sibling Redis f
 ## Migration Plan
 
 1. Before apply, verify T06 and the T01 Redis foundation have merged/rebased onto the selected base, record both merge/rebase commits, and re-read both merged planning/contracts; otherwise stop.
-2. Apply only the booking-owned Java/XML/test paths in the dedicated worktree. No migration or shared-file change is part of this change.
+2. Apply only the booking-owned Java and test paths in the dedicated worktree. No mapper XML resource, migration, or shared-file change is part of this change.
 3. Run pure tests, MySQL 8 transaction/rollback/unique-conflict tests, real Redis lock tests, the 50–100 request contention test, independent resource/date parallelism, `mvn verify`, OpenSpec strict validation, and `git diff --check`.
 4. If implementation must be rolled back, revert the booking-only change; leave the frozen schema and shared dependency commit intact. Do not retain the intentionally vulnerable baseline in a deployed branch.
 
