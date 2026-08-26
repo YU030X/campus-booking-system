@@ -108,10 +108,14 @@ class BookingActionsMysqlIntegrationTest {
         LocalDateTime start = LocalDateTime.of(date, LocalTime.of(14, 0));
         jdbc.update("INSERT INTO booking(booking_no,user_id,resource_id,start_time,end_time,purpose,"
                         + "attendee_count,status,deleted) VALUES (?,?,?,?,?,NULL,2,?,0)",
-                fixtureName + "-" + status + "-" + System.nanoTime(), ownerId, resourceId,
+                uniqueBookingNo(status.charAt(0)), ownerId, resourceId,
                 start, start.plusMinutes(30), status);
         return jdbc.queryForObject("SELECT id FROM booking WHERE user_id=? AND status=? ORDER BY id DESC LIMIT 1",
                 Long.class, ownerId, status);
+    }
+
+    private String uniqueBookingNo(char tag) {
+        return "B" + tag + Long.toString(System.nanoTime(), Character.MAX_RADIX);
     }
 
     private int slotCount(long id) {
@@ -144,7 +148,7 @@ class BookingActionsMysqlIntegrationTest {
         assertEquals(BookingStatus.REJECTED, reject.booking().status());
         assertEquals(0, slotCount(pending));
 
-        long approved = insertBooking("CONFIRMED");
+        long approved = insertBooking("PENDING_APPROVAL");
         insertSlot(approved);
         BookingActionOutcome approve = actions.approve(approved);
         assertEquals(BookingActionOutcome.Result.WINNER, approve.result());

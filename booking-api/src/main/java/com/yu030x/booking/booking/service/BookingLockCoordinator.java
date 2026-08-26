@@ -23,7 +23,12 @@ public class BookingLockCoordinator {
     }
 
     public <T> T withResourceDateLock(long resourceId, LocalDate bookingDate, Supplier<T> action) {
-        RLock lock = lock(resourceId, bookingDate);
+        RLock lock;
+        try {
+            lock = lock(resourceId, bookingDate);
+        } catch (RedisException exception) {
+            throw busy();
+        }
         boolean acquired = false;
         try {
             acquired = lock.tryLock(WAIT_SECONDS, TimeUnit.SECONDS);
@@ -39,11 +44,11 @@ public class BookingLockCoordinator {
         try {
             return action.get();
         } finally {
-            if (lock.isHeldByCurrentThread()) {
-                try {
+            try {
+                if (lock.isHeldByCurrentThread()) {
                     lock.unlock();
-                } catch (RedisException ignored) {
                 }
+            } catch (RedisException ignored) {
             }
         }
     }

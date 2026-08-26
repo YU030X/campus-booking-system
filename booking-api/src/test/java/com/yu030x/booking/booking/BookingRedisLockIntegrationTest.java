@@ -2,6 +2,10 @@ package com.yu030x.booking.booking;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.yu030x.booking.booking.service.BookingLockCoordinator;
 import com.yu030x.booking.booking.service.BookingMessages;
@@ -12,14 +16,13 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
-import org.redisson.Redisson;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
-import org.redisson.config.Config;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -83,7 +86,6 @@ class BookingRedisLockIntegrationTest {
     void acquiresReleasesAndOnlyOwnerUnlocks() throws Exception {
         String key = KEY_PREFIX + RESOURCE + ":" + DATE;
         AtomicBoolean heldInside = new AtomicBoolean(false);
-        AtomicBoolean heldOutside = new AtomicBoolean(true);
 
         String outcome = coordinator.withResourceDateLock(RESOURCE, DATE, () -> {
             heldInside.set(redisson.getLock(key).isHeldByCurrentThread()
@@ -97,25 +99,54 @@ class BookingRedisLockIntegrationTest {
 
         RLock lock = redisson.getLock(key);
         assertThat(lock.tryLock(3, TimeUnit.SECONDS)).isTrue();
-        CountDownLatch released = new CountDownLatch(1);
-        Thread owner = new Thread(() -> {
+        AtomicReference<Throwable> intruderFailure = new AtomicReference<>();
+        CountDownLatch attempted = new CountDownLatch(1);
+        Thread nonOwner = new Thread(() -> {
             try {
                 assertThat(lock.isHeldByCurrentThread()).isFalse();
-                heldOutside.set(lock.isHeldByCurrentThread() || !lock.isLocked());
+                try {
+                    lock.unlock();
+                } catch (RuntimeException failure) {
+                    intruderFailure.set(failure);
+                }
+                assertThat(lock.isLocked())
+                        .as("non-owner unlock attempt must leave the owner's lock held").isTrue();
             } finally {
-                lock.unlock();
-                released.countDown();
+                attempted.countDown();
             }
         });
-        owner.start();
-        assertThat(released.await(5, TimeUnit.SECONDS)).isTrue();
-        assertThat(heldOutside).isFalse();
+        nonOwner.start();
+        assertThat(attempted.await(5, TimeUnit.SECONDS)).isTrue();
+
+        lock.unlock();
+        assertThat(redisson.getLock(key).isLocked()).isFalse();
     }
 
     @Test
     void contendedSameKeyWaitsThreeSecondsThenFailsClosedWithSystemBusy() throws Exception {
-        RLock holder = redisson.getLock(KEY_PREFIX + 4302L + ":2027-01-11");
-        assertThat(holder.tryLock(3, TimeUnit.SECONDS)).isTrue();
+        String heldKey = KEY_PREFIX + 4302L + ":2027-01-11";
+        RLock holder = redisson.getLock(heldKey);
+        CountDownLatch holderReady = new CountDownLatch(1);
+        CountDownLatch releaseGate = new CountDownLatch(1);
+        Thread holdingThread = new Thread(() -> {
+            try {
+                if (holder.tryLock(3, TimeUnit.SECONDS)) {
+                    try {
+                        holderReady.countDown();
+                        releaseGate.await(15, TimeUnit.SECONDS);
+                    } finally {
+                        holder.unlock();
+                    }
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } finally {
+                holderReady.countDown();
+            }
+        });
+        holdingThread.start();
+        assertThat(holderReady.await(5, TimeUnit.SECONDS)).isTrue();
+
         try {
             long start = System.nanoTime();
             BizException exception = assertThrows(BizException.class, () ->
@@ -126,14 +157,38 @@ class BookingRedisLockIntegrationTest {
             assertThat(exception.getMessage()).isEqualTo(BookingMessages.SYSTEM_BUSY);
             assertThat(waitedMs).as("waited at least ~3s").isGreaterThanOrEqualTo(2900L);
         } finally {
-            holder.unlock();
+            releaseGate.countDown();
+            holdingThread.join(TimeUnit.SECONDS.toMillis(10));
+            assertThat(holder.isLocked())
+                    .as("holder thread must have released the lock before this test ends").isFalse();
         }
     }
 
     @Test
     void differentResourceOrDateKeysProgressIndependentlyWithoutGlobalSerialization() throws Exception {
-        RLock holder = redisson.getLock(KEY_PREFIX + RESOURCE + ":" + DATE);
-        assertThat(holder.tryLock(3, TimeUnit.SECONDS)).isTrue();
+        String heldKey = KEY_PREFIX + RESOURCE + ":" + DATE;
+        RLock holder = redisson.getLock(heldKey);
+        CountDownLatch holderReady = new CountDownLatch(1);
+        CountDownLatch releaseGate = new CountDownLatch(1);
+        Thread holdingThread = new Thread(() -> {
+            try {
+                if (holder.tryLock(3, TimeUnit.SECONDS)) {
+                    try {
+                        holderReady.countDown();
+                        releaseGate.await(15, TimeUnit.SECONDS);
+                    } finally {
+                        holder.unlock();
+                    }
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } finally {
+                holderReady.countDown();
+            }
+        });
+        holdingThread.start();
+        assertThat(holderReady.await(5, TimeUnit.SECONDS)).isTrue();
+
         try {
             long start = System.nanoTime();
             String other = coordinator.withResourceDateLock(RESOURCE + 1, DATE.plusDays(2), () -> "free");
@@ -143,31 +198,45 @@ class BookingRedisLockIntegrationTest {
             assertThat(elapsedMs).as("independent domain must not wait for the 3s contention window")
                     .isLessThan(2500L);
         } finally {
-            holder.unlock();
+            releaseGate.countDown();
+            holdingThread.join(TimeUnit.SECONDS.toMillis(10));
+            assertThat(holder.isLocked())
+                    .as("holder thread must have released the lock before this test ends").isFalse();
         }
     }
 
     @Test
-    void unreachableRedisFailsClosedWithSystemBusyAndNeverPretendsToHoldTheLock() {
-        Config config = new Config();
-        config.setCodec(org.redisson.client.codec.StringCodec.INSTANCE);
-        config.useSingleServer()
-                .setAddress("redis://127.0.0.1:6390")
-                .setConnectTimeout(300)
-                .setTimeout(500)
-                .setRetryAttempts(0)
-                .setRetryInterval(100);
-        RedissonClient broken = Redisson.create(config);
-        BookingLockCoordinator isolated =
-                new BookingLockCoordinator(new StaticProvider(broken));
+    void redisFailuresFromGetLockOrTryLockFailsClosedWithSystemBusyAndNeverRunsTheAction() {
+        org.redisson.api.RedissonClient brokenClient = mock(org.redisson.api.RedissonClient.class);
+        org.redisson.api.RLock brokenLock = mock(org.redisson.api.RLock.class);
+        when(brokenClient.getLock(KEY_PREFIX + RESOURCE + ":" + DATE))
+                .thenThrow(new org.redisson.client.RedisException("getLock failed"));
+        BookingLockCoordinator getLockBroken =
+                new BookingLockCoordinator(new StaticProvider(brokenClient));
+
+        assertSystemBusy(() -> getLockBroken.withResourceDateLock(RESOURCE, DATE, () -> "unlocked-success"));
+        verify(brokenClient).getLock(KEY_PREFIX + RESOURCE + ":" + DATE);
+
+        when(brokenClient.getLock(KEY_PREFIX + RESOURCE + ":" + DATE.plusDays(1))).thenReturn(brokenLock);
         try {
-            BizException exception = assertThrows(BizException.class, () ->
-                    isolated.withResourceDateLock(RESOURCE, DATE, () -> "unlocked-success"));
-            assertThat(exception.errorCode).isEqualTo(ErrorCode.BOOKING_ERROR);
-            assertThat(exception.getMessage()).isEqualTo(BookingMessages.SYSTEM_BUSY);
-        } finally {
-            broken.shutdown(0, 2, TimeUnit.SECONDS);
+            when(brokenLock.tryLock(3L, TimeUnit.SECONDS))
+                    .thenThrow(new org.redisson.client.RedisException("connection refused"));
+        } catch (InterruptedException impossible) {
+            throw new IllegalStateException(impossible);
         }
+        BookingLockCoordinator tryLockBroken =
+                new BookingLockCoordinator(new StaticProvider(brokenClient));
+
+        assertSystemBusy(() -> tryLockBroken.withResourceDateLock(
+                RESOURCE, DATE.plusDays(1), () -> "unlocked-success"));
+        verify(brokenLock, never()).isHeldByCurrentThread();
+        verify(brokenLock, never()).unlock();
+    }
+
+    private void assertSystemBusy(java.util.function.Supplier<String> action) {
+        BizException exception = assertThrows(BizException.class, action::get);
+        assertThat(exception.errorCode).isEqualTo(ErrorCode.BOOKING_ERROR);
+        assertThat(exception.getMessage()).isEqualTo(BookingMessages.SYSTEM_BUSY);
     }
 
     private record StaticProvider(RedissonClient client)

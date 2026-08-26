@@ -101,6 +101,17 @@ class BookingLockCoordinatorTest {
     }
 
     @Test
+    void failsClosedWhenGetLockCommunicationFails() {
+        when(redissonClient.getLock(KEY)).thenThrow(new RedisException("cluster down"));
+
+        BizException exception = assertThrows(BizException.class,
+                () -> coordinator.withResourceDateLock(RESOURCE_ID, DATE, action));
+
+        assertEquals(ErrorCode.BOOKING_ERROR, exception.errorCode);
+        assertEquals(BookingMessages.SYSTEM_BUSY, exception.getMessage());
+    }
+
+    @Test
     void unlockFailureDoesNotMaskActionResult() throws Exception {
         when(lock.tryLock(3, TimeUnit.SECONDS)).thenReturn(true);
         when(lock.isHeldByCurrentThread()).thenReturn(true);

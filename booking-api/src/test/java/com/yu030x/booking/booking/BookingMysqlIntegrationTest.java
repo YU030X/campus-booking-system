@@ -168,7 +168,8 @@ class BookingMysqlIntegrationTest {
     void frozenUniqueKeyStillRejectsDuplicateResourceSlotPairs() {
         jdbc.update("INSERT INTO booking_slot(resource_id,slot_time,booking_id) VALUES (?,?,?)",
                 resourceId, at("09:00"), FAKE_OTHER_BOOKING);
-        assertThat(indexDefinition()).startsWith("uk_resource_slot|0|resource_id|slot_time|");
+        assertThat(uniqueKeyColumns()).containsExactly("resource_id", "slot_time");
+        assertThat(uniqueKeyNonUnique()).isEqualTo(0);
 
         assertThrows(DuplicateKeyException.class,
                 () -> jdbc.update("INSERT INTO booking_slot(resource_id,slot_time,booking_id) VALUES (?,?,?)",
@@ -219,11 +220,16 @@ class BookingMysqlIntegrationTest {
                 (rs, row) -> rs.getTimestamp(1).toLocalDateTime(), bookingId);
     }
 
-    private String indexDefinition() {
-        return jdbc.query("SELECT index_name,non_unique,column_name FROM information_schema.statistics "
+    private List<String> uniqueKeyColumns() {
+        return jdbc.query("SELECT column_name FROM information_schema.statistics "
                         + "WHERE table_schema=DATABASE() AND table_name='booking_slot' "
                         + "AND index_name='uk_resource_slot' ORDER BY seq_in_index",
-                (rs, row) -> rs.getString(1) + "|" + rs.getInt(2) + "|" + rs.getString(3))
-                .stream().reduce((a, b) -> a + "|" + b).orElse("");
+                (rs, row) -> rs.getString(1));
+    }
+
+    private int uniqueKeyNonUnique() {
+        return jdbc.queryForObject("SELECT MIN(non_unique) FROM information_schema.statistics "
+                + "WHERE table_schema=DATABASE() AND table_name='booking_slot' "
+                + "AND index_name='uk_resource_slot'", Integer.class);
     }
 }
