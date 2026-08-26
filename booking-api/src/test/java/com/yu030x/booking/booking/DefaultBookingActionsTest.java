@@ -31,6 +31,7 @@ class DefaultBookingActionsTest {
     private static final long BOOKING_ID = 9L;
     private static final long OWNER_ID = 5L;
     private static final LocalDateTime NOW = LocalDate.of(2026, 8, 26).atTime(10, 0);
+    private static final LocalDateTime ACTION_TIME = LocalDate.of(2026, 8, 26).atTime(9, 30);
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
     private BookingMapper bookingMapper;
@@ -97,11 +98,11 @@ class DefaultBookingActionsTest {
     void missingOrDeletedBookingsAreIndistinguishableNotFound() {
         when(bookingMapper.approvePending(BOOKING_ID, NOW)).thenReturn(0);
         when(bookingMapper.selectActiveById(BOOKING_ID)).thenReturn(null);
-        when(bookingMapper.cancelActiveByOwner(BOOKING_ID, OWNER_ID, null, NOW)).thenReturn(0);
+        when(bookingMapper.cancelActiveByOwner(BOOKING_ID, OWNER_ID, null, ACTION_TIME)).thenReturn(0);
         when(bookingMapper.selectActiveByIdAndUser(BOOKING_ID, OWNER_ID)).thenReturn(null);
 
         BookingActionOutcome approve = actions.approve(BOOKING_ID);
-        BookingActionOutcome cancel = actions.cancel(BOOKING_ID, OWNER_ID, null);
+        BookingActionOutcome cancel = actions.cancel(BOOKING_ID, OWNER_ID, ACTION_TIME, null);
 
         assertEquals(BookingActionOutcome.Result.NOT_FOUND, approve.result());
         assertNull(approve.booking());
@@ -111,10 +112,10 @@ class DefaultBookingActionsTest {
     @Test
     void foreignCancelIsMaskedAsNotFoundLikeMissingRecords() {
         long foreignOwnerId = 77L;
-        when(bookingMapper.cancelActiveByOwner(BOOKING_ID, foreignOwnerId, null, NOW)).thenReturn(0);
+        when(bookingMapper.cancelActiveByOwner(BOOKING_ID, foreignOwnerId, null, ACTION_TIME)).thenReturn(0);
         when(bookingMapper.selectActiveByIdAndUser(BOOKING_ID, foreignOwnerId)).thenReturn(null);
 
-        BookingActionOutcome outcome = actions.cancel(BOOKING_ID, foreignOwnerId, null);
+        BookingActionOutcome outcome = actions.cancel(BOOKING_ID, foreignOwnerId, ACTION_TIME, null);
 
         assertEquals(BookingActionOutcome.Result.NOT_FOUND, outcome.result());
         assertNull(outcome.booking());
@@ -125,14 +126,14 @@ class DefaultBookingActionsTest {
     void winningRejectCancelsAndNoShowReleaseAllSlotsOnce() {
         when(bookingMapper.rejectPending(BOOKING_ID, NOW)).thenReturn(1);
         when(bookingMapper.selectActiveById(BOOKING_ID)).thenReturn(entity(BookingStatus.REJECTED));
-        when(bookingMapper.cancelActiveByOwner(BOOKING_ID, OWNER_ID, "改期", NOW)).thenReturn(1);
+        when(bookingMapper.cancelActiveByOwner(BOOKING_ID, OWNER_ID, "改期", ACTION_TIME)).thenReturn(1);
         when(bookingMapper.selectActiveByIdAndUser(BOOKING_ID, OWNER_ID))
                 .thenReturn(entity(BookingStatus.CANCELLED));
         when(bookingMapper.markNoShowConfirmed(BOOKING_ID, NOW)).thenReturn(1);
 
         assertEquals(BookingActionOutcome.Result.WINNER, actions.reject(BOOKING_ID).result());
         assertEquals(BookingActionOutcome.Result.WINNER,
-                actions.cancel(BOOKING_ID, OWNER_ID, "  改期  ").result());
+                actions.cancel(BOOKING_ID, OWNER_ID, ACTION_TIME, "  改期  ").result());
         assertEquals(BookingActionOutcome.Result.WINNER, actions.markNoShow(BOOKING_ID).result());
 
         verify(slotRelease, times(3)).releaseTerminalSlots(BOOKING_ID);
@@ -140,14 +141,23 @@ class DefaultBookingActionsTest {
 
     @Test
     void cancelNormalizesReasonAndPersistsItOnlyForTheWinner() {
-        when(bookingMapper.cancelActiveByOwner(BOOKING_ID, OWNER_ID, "有事", NOW)).thenReturn(1);
+        when(bookingMapper.cancelActiveByOwner(BOOKING_ID, OWNER_ID, "有事", ACTION_TIME)).thenReturn(1);
         when(bookingMapper.selectActiveByIdAndUser(BOOKING_ID, OWNER_ID))
                 .thenReturn(entity(BookingStatus.CANCELLED));
 
         assertEquals(BookingActionOutcome.Result.WINNER,
-                actions.cancel(BOOKING_ID, OWNER_ID, " 有事 ").result());
+                actions.cancel(BOOKING_ID, OWNER_ID, ACTION_TIME, " 有事 ").result());
 
-        verify(bookingMapper).cancelActiveByOwner(BOOKING_ID, OWNER_ID, "有事", NOW);
+        verify(bookingMapper).cancelActiveByOwner(BOOKING_ID, OWNER_ID, "有事", ACTION_TIME);
+    }
+
+    @Test
+    void cancelRequiresCallerSuppliedActionTime() {
+        BizException exception = assertThrows(BizException.class,
+                () -> actions.cancel(BOOKING_ID, OWNER_ID, null, null));
+
+        assertEquals(ErrorCode.INVALID_PARAMETER, exception.errorCode);
+        verifyNoInteractions(bookingMapper);
     }
 
     @Test
@@ -155,7 +165,7 @@ class DefaultBookingActionsTest {
         String tooLong = "😀".repeat(201);
 
         BizException exception = assertThrows(BizException.class,
-                () -> actions.cancel(BOOKING_ID, OWNER_ID, tooLong));
+                () -> actions.cancel(BOOKING_ID, OWNER_ID, ACTION_TIME, tooLong));
 
         assertEquals(ErrorCode.INVALID_PARAMETER, exception.errorCode);
         verifyNoInteractions(slotRelease);
@@ -196,11 +206,11 @@ class DefaultBookingActionsTest {
 
     @Test
     void repeatedCancelReturnsCurrentViewWithoutSecondRelease() {
-        when(bookingMapper.cancelActiveByOwner(BOOKING_ID, OWNER_ID, null, NOW)).thenReturn(0);
+        when(bookingMapper.cancelActiveByOwner(BOOKING_ID, OWNER_ID, null, ACTION_TIME)).thenReturn(0);
         when(bookingMapper.selectActiveByIdAndUser(BOOKING_ID, OWNER_ID))
                 .thenReturn(entity(BookingStatus.CANCELLED));
 
-        BookingActionOutcome outcome = actions.cancel(BOOKING_ID, OWNER_ID, null);
+        BookingActionOutcome outcome = actions.cancel(BOOKING_ID, OWNER_ID, ACTION_TIME, null);
 
         assertEquals(BookingActionOutcome.Result.ALREADY_COMPLETED, outcome.result());
         verifyNoInteractions(slotRelease);

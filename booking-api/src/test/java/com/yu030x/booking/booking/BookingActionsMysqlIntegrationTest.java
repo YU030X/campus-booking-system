@@ -2,11 +2,16 @@ package com.yu030x.booking.booking;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.yu030x.booking.booking.mapper.BookingMapper;
 import com.yu030x.booking.booking.service.BookingActionOutcome;
 import com.yu030x.booking.booking.service.BookingActions;
+import com.yu030x.booking.booking.service.BookingAdminReads;
+import com.yu030x.booking.booking.vo.BookingView;
+import com.yu030x.booking.common.api.PageResult;
 import com.yu030x.booking.common.api.BookingStatus;
+import com.yu030x.booking.common.exception.BizException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -38,6 +43,8 @@ class BookingActionsMysqlIntegrationTest {
     private BookingMapper bookingMapper;
     @Autowired
     private BookingActions actions;
+    @Autowired
+    private BookingAdminReads adminReads;
 
     private long categoryId;
     private long resourceId;
@@ -128,6 +135,27 @@ class BookingActionsMysqlIntegrationTest {
     }
 
     @Test
+    void pendingApprovalPageListsOnlyPendingRowsInAscendingOrderAndValidatesBounds() {
+        long first = insertBooking("PENDING_APPROVAL");
+        long second = insertBooking("PENDING_APPROVAL");
+        insertBooking("CONFIRMED");
+        insertBooking("REJECTED");
+
+        PageResult<BookingView> page = adminReads.pagePendingApprovals(1, 10);
+
+        assertThat(page.total()).isEqualTo(2);
+        assertThat(page.pageNumber()).isEqualTo(1);
+        assertThat(page.pageSize()).isEqualTo(10);
+        assertThat(page.records()).extracting(BookingView::id)
+                .containsExactly(String.valueOf(first), String.valueOf(second));
+        assertThat(page.records()).allSatisfy(view ->
+                assertThat(view.status()).isEqualTo(BookingStatus.PENDING_APPROVAL));
+
+        assertThrows(BizException.class, () -> adminReads.pagePendingApprovals(0, 10));
+        assertThrows(BizException.class, () -> adminReads.pagePendingApprovals(1, 101));
+    }
+
+    @Test
     void conditionalApproveWinsOnceThenIsIdenticallyIdempotent() {
         bookingId = insertBooking("PENDING_APPROVAL");
         insertSlot(bookingId);
@@ -157,16 +185,17 @@ class BookingActionsMysqlIntegrationTest {
     }
 
     @Test
-    void cancelRequiresOwnershipAndActiveSourceStates() {
+    void cancelRequiresOwnershipActiveStatesAndStrictlyBeforeStart() {
         long pending = insertBooking("PENDING_APPROVAL");
         insertSlot(pending);
-        BookingActionOutcome foreign = actions.cancel(pending, foreignId, null);
+        LocalDateTime beforeStart = LocalDateTime.of(date, LocalTime.of(13, 30));
+        BookingActionOutcome foreign = actions.cancel(pending, foreignId, beforeStart, null);
         assertEquals(BookingActionOutcome.Result.NOT_FOUND, foreign.result());
         assertThat(jdbc.queryForObject("SELECT status FROM booking WHERE id=?", String.class, pending))
                 .isEqualTo("PENDING_APPROVAL");
         assertEquals(1, slotCount(pending));
 
-        BookingActionOutcome winner = actions.cancel(pending, ownerId, " 有事 ");
+        BookingActionOutcome winner = actions.cancel(pending, ownerId, beforeStart, " 有事 ");
         assertEquals(BookingActionOutcome.Result.WINNER, winner.result());
         assertEquals(BookingStatus.CANCELLED, winner.booking().status());
         assertThat(jdbc.queryForObject(
@@ -175,14 +204,34 @@ class BookingActionsMysqlIntegrationTest {
                 pending)).isNotNull();
         assertEquals(0, slotCount(pending));
 
-        BookingActionOutcome repeat = actions.cancel(pending, ownerId, "again");
+        BookingActionOutcome repeat = actions.cancel(pending, ownerId, beforeStart, "again");
         assertEquals(BookingActionOutcome.Result.ALREADY_COMPLETED, repeat.result());
 
         long checkedIn = insertBooking("CHECKED_IN");
         assertEquals(BookingActionOutcome.Result.ILLEGAL_TRANSITION,
-                actions.cancel(checkedIn, ownerId, null).result());
+                actions.cancel(checkedIn, ownerId, beforeStart, null).result());
         assertThat(jdbc.queryForObject("SELECT status FROM booking WHERE id=?", String.class, checkedIn))
                 .isEqualTo("CHECKED_IN");
+    }
+
+    @Test
+    void cancelExactlyAtStartOrLaterIsIllegalAndChangesNothing() {
+        LocalDateTime start = LocalDateTime.of(date, LocalTime.of(14, 0));
+        long booking = insertBooking("CONFIRMED");
+        insertSlot(booking);
+
+        assertEquals(BookingActionOutcome.Result.ILLEGAL_TRANSITION,
+                actions.cancel(booking, ownerId, start, null).result());
+        assertEquals(BookingActionOutcome.Result.ILLEGAL_TRANSITION,
+                actions.cancel(booking, ownerId, start.plusMinutes(5), null).result());
+
+        assertThat(jdbc.queryForObject("SELECT status FROM booking WHERE id=?", String.class, booking))
+                .isEqualTo("CONFIRMED");
+        assertThat(jdbc.queryForObject("SELECT cancel_time FROM booking WHERE id=?",
+                java.sql.Timestamp.class, booking)).isNull();
+        assertThat(jdbc.queryForObject("SELECT cancel_reason FROM booking WHERE id=?", String.class, booking))
+                .isNull();
+        assertEquals(1, slotCount(booking));
     }
 
     @Test

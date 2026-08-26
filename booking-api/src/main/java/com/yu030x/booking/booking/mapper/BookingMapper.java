@@ -47,14 +47,25 @@ public interface BookingMapper extends BaseMapper<BookingEntity> {
             + "WHERE id=#{id} AND deleted=0 AND status='PENDING_APPROVAL'")
     int rejectPending(@Param("id") long id, @Param("now") LocalDateTime now);
 
-    @Update("UPDATE booking SET status='CANCELLED',cancel_time=#{now},cancel_reason=#{reason},updated_at=#{now} "
+    @Select("""
+            <script>
+            SELECT id,booking_no,user_id,resource_id,start_time,end_time,purpose,attendee_count,status,
+                   checkin_time,cancel_time,cancel_reason,deleted,created_at,updated_at
+            FROM booking
+            WHERE deleted=0 AND status='PENDING_APPROVAL'
+            ORDER BY created_at ASC,id ASC
+            </script>
+            """)
+    IPage<BookingEntity> selectPendingApprovalPage(IPage<BookingEntity> page);
+
+    @Update("UPDATE booking SET status='CANCELLED',cancel_time=#{actionTime},cancel_reason=#{reason},updated_at=#{actionTime} "
             + "WHERE id=#{id} AND user_id=#{userId} AND deleted=0 "
-            + "AND status IN ('PENDING_APPROVAL','CONFIRMED')")
+            + "AND status IN ('PENDING_APPROVAL','CONFIRMED') AND start_time > #{actionTime}")
     int cancelActiveByOwner(
             @Param("id") long id,
             @Param("userId") long userId,
             @Param("reason") String reason,
-            @Param("now") LocalDateTime now);
+            @Param("actionTime") LocalDateTime actionTime);
 
     @Update("UPDATE booking SET status='CHECKED_IN',checkin_time=#{checkinTime},updated_at=#{now} "
             + "WHERE id=#{id} AND user_id=#{userId} AND deleted=0 AND status='CONFIRMED'")

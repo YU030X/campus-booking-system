@@ -57,9 +57,13 @@ public class DefaultBookingActions implements BookingActions {
 
     @Override
     @Transactional
-    public BookingActionOutcome cancel(long bookingId, long ownerUserId, String cancelReason) {
+    public BookingActionOutcome cancel(long bookingId, long ownerUserId, LocalDateTime actionTime,
+            String cancelReason) {
+        if (actionTime == null) {
+            throw new BizException(ErrorCode.INVALID_PARAMETER, "invalid cancel time");
+        }
         String reason = normalizedReason(cancelReason);
-        if (bookingMapper.cancelActiveByOwner(bookingId, ownerUserId, reason, now()) == 1) {
+        if (bookingMapper.cancelActiveByOwner(bookingId, ownerUserId, reason, actionTime) == 1) {
             slotRelease.releaseTerminalSlots(bookingId);
             return BookingActionOutcome.winner(
                     BookingView.from(bookingMapper.selectActiveByIdAndUser(bookingId, ownerUserId)));
