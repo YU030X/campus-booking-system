@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface BookingMapper extends BaseMapper<BookingEntity> {
@@ -32,6 +33,40 @@ public interface BookingMapper extends BaseMapper<BookingEntity> {
             + "checkin_time,cancel_time,cancel_reason,deleted,created_at,updated_at "
             + "FROM booking WHERE deleted=0 AND id=#{id} AND user_id=#{userId}")
     BookingEntity selectActiveByIdAndUser(@Param("id") long id, @Param("userId") long userId);
+
+    @Select("SELECT id,booking_no,user_id,resource_id,start_time,end_time,purpose,attendee_count,status,"
+            + "checkin_time,cancel_time,cancel_reason,deleted,created_at,updated_at "
+            + "FROM booking WHERE deleted=0 AND id=#{id}")
+    BookingEntity selectActiveById(@Param("id") long id);
+
+    @Update("UPDATE booking SET status='CONFIRMED',updated_at=#{now} "
+            + "WHERE id=#{id} AND deleted=0 AND status='PENDING_APPROVAL'")
+    int approvePending(@Param("id") long id, @Param("now") LocalDateTime now);
+
+    @Update("UPDATE booking SET status='REJECTED',updated_at=#{now} "
+            + "WHERE id=#{id} AND deleted=0 AND status='PENDING_APPROVAL'")
+    int rejectPending(@Param("id") long id, @Param("now") LocalDateTime now);
+
+    @Update("UPDATE booking SET status='CANCELLED',cancel_time=#{now},cancel_reason=#{reason},updated_at=#{now} "
+            + "WHERE id=#{id} AND user_id=#{userId} AND deleted=0 "
+            + "AND status IN ('PENDING_APPROVAL','CONFIRMED')")
+    int cancelActiveByOwner(
+            @Param("id") long id,
+            @Param("userId") long userId,
+            @Param("reason") String reason,
+            @Param("now") LocalDateTime now);
+
+    @Update("UPDATE booking SET status='CHECKED_IN',checkin_time=#{checkinTime},updated_at=#{now} "
+            + "WHERE id=#{id} AND user_id=#{userId} AND deleted=0 AND status='CONFIRMED'")
+    int checkInConfirmedByOwner(
+            @Param("id") long id,
+            @Param("userId") long userId,
+            @Param("checkinTime") LocalDateTime checkinTime,
+            @Param("now") LocalDateTime now);
+
+    @Update("UPDATE booking SET status='NO_SHOW',updated_at=#{now} "
+            + "WHERE id=#{id} AND deleted=0 AND status='CONFIRMED'")
+    int markNoShowConfirmed(@Param("id") long id, @Param("now") LocalDateTime now);
 
     @Select("SELECT COUNT(*) FROM booking WHERE deleted=0 AND user_id=#{userId} AND status IN "
             + BookingMapper.ACTIVE_STATUSES)
