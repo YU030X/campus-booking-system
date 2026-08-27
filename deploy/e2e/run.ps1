@@ -1,0 +1,400 @@
+#Requires -Version 7.0
+<#
+.SYNOPSIS
+    T13 slice 4: integration / E2E execution plan over EXISTING repo test assets.
+.DESCRIPTION
+    STATIC PLAN - default is PLAN MODE. -Execute actually runs the selected mode.
+    Nothing in this lane has ever been executed (tasks 1.4, 2.1-2.5 stay
+    unchecked until real runs).
+
+    Modes:
+      ApiIntegration   - narrow, EXPLICITLY LISTED set of existing booking-api
+                         test classes covering: auth + password non-disclosure,
+                         resources, availability, direct + pending booking,
+                         approval/reject, cancel, check-in, no-show/violation,
+                         slot release, idempotency, concurrency, boundaries.
+                         The list is hardcoded below AND mirrored in
+                         deploy/e2e/inventory.md. Every class file is verified
+                         to exist BEFORE mvn runs; ANY missing class BLOCKS the
+                         run (exit 3) - coverage is never silently claimed.
+      StudentBrowser   - reuses the repo's ONLY browser harness
+                         scripts/tests/t08/run.ps1 -Action Run (Chrome
+                         --headless=new over raw CDP). Requires profile
+                         fixtureAttested=true; sets T08_QA_FRONTEND/T08_QA_BACKEND
+                         to the profile loopback URLs. The T08 harness is NEVER
+                         copied or modified.
+      ApprovalBrowser  - deterministic approval browser flow. If profile
+                         approvalBrowserFixtureAttested is false => BLOCKED
+                         (exit 3). Even when true, execution happens ONLY if
+                         profile.approvalBrowserCommand provides an approved
+                         command/path (mocks forbidden). This mode NEVER reports
+                         pass: executed => exit 2 (EXECUTED_UNPROVEN).
+      All              - Api -> Student -> Approval, in order; any blocked or
+                         failing child makes the overall run non-zero.
+
+    Safety contract:
+      * Deep URL validation: scheme http/https, loopback host, empty
+        path/query/userinfo/fragment. publicAccessDenied must be true.
+      * Credentials: env VARIABLE NAMES only in the profile; values must exist
+        in the host environment at Execute time and are never printed.
+      * Artifacts per run-id under deploy/artifacts/e2e-<mode>-<runid>/; text
+        artifacts are redacted via deploy/e2e/redact-artifacts.mjs; screenshots
+        are marked "requires manual visual PII review" and never auto-claimed
+        redacted.
+    Exit codes: 0 pass | 1 environment failure | 2 refused/unproven |
+    3 blocked (missing class/fixture/env).
+#>
+[CmdletBinding()]
+param(
+    [ValidateSet('ApiIntegration', 'StudentBrowser', 'ApprovalBrowser', 'All')]
+    [string]$Mode = 'All',
+    [switch]$Execute,
+    [string]$ProfilePath = '',
+    [string]$ArtifactRoot = '',
+    [string]$RunId = ('run-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+if ($RunId -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$') {
+    Write-Warning ("REFUSED: RunId '{0}' fails ^[A-Za-z0-9][A-Za-z0-9_-]{{0,63}}$" -f $RunId)
+    exit 2
+}
+
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+if (-not $ProfilePath)  { $ProfilePath  = (Join-Path $PSScriptRoot 'profile.example.json') }
+if (-not $ArtifactRoot) { $ArtifactRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\artifacts')).Path }
+New-Item -ItemType Directory -Path $ArtifactRoot -Force | Out-Null
+
+# ---- THE explicit ApiIntegration class set (mirrored in inventory.md) ----------
+$script:ApiClasses = @(
+    'auth/AuthServiceTest',
+    'auth/AuthControllerMockMvcTest',
+    'auth/RequestValidationTest',
+    'auth/security/JwtSecurityTest',
+    'resource/ResourceApiTest',
+    'availability/AvailabilityApiTest',
+    'availability/AvailabilityServiceTest',
+    'booking/BookingControllerMockMvcTest',
+    'booking/BookingCreatorTest',
+    'booking/BookingCreationGuardTest',
+    'booking/BookingIntervalValidatorTest',
+    'booking/BookingSlotSplitterTest',
+    'booking/DefaultBookingActionsTest',
+    'approval/ApprovalServiceTest',
+    'approval/ApprovalRequestTest',
+    'approval/ApprovalControllerMockMvcTest',
+    'checkin/CheckInServiceTest',
+    'checkin/CheckInControllerMockMvcTest',
+    'violation/ViolationServiceTest',
+    'violation/DefaultViolationPortTest',
+    'violation/ViolationControllerMockMvcTest',
+    'task/NoShowScanTaskTest',
+    'task/NoShowItemProcessorTest',
+    'booking/BookingActionsMysqlIntegrationTest',
+    'booking/BookingMysqlIntegrationTest',
+    'booking/BookingConcurrencyIntegrationTest',
+    'booking/BookingRedisLockIntegrationTest',
+    'approval/ApprovalMysqlIntegrationTest',
+    'approval/ApprovalApiRealIntegrationTest',
+    'violation/NoShowMysqlIntegrationTest',
+    'violation/ViolationPortLateCancelMysqlIntegrationTest',
+    'user/UserMysqlIntegrationTest',
+    'common/config/SecurityContextIntegrationTest'
+)
+$script:ApiClasses = @($script:ApiClasses | Select-Object -Unique)
+
+# Env contract: DB_URL + REDIS_HOST are hard-required; RESOURCE_MYSQL_URL /
+# USER_CREDIT_MYSQL_URL are DERIVED from DB_URL when absent; REDIS_PORT
+# defaults to 6379; credential values arrive via the profile-declared ENV
+# NAMES (never via this file).
+$script:HardRequiredEnv = @('DB_URL', 'REDIS_HOST')
+$script:DerivedFromDbUrl = @('RESOURCE_MYSQL_URL', 'USER_CREDIT_MYSQL_URL')
+
+$localHosts = @('127.0.0.1', 'localhost', '::1')
+
+function Assert-LocalUrl {
+    param([string]$Url, [string]$Label)
+    $u = [uri]$Url
+    if ($u.Scheme -notin @('http', 'https')) {
+        Write-Warning ("REFUSED: {0} scheme '{1}' must be http/https" -f $Label, $u.Scheme); exit 2
+    }
+    if ($localHosts -notcontains $u.Host) {
+        Write-Warning ("REFUSED: {0} host '{1}' is not loopback - public/prod denied." -f $Label, $u.Host); exit 2
+    }
+    if ($u.AbsolutePath -ne '/') { Write-Warning ("REFUSED: {0} must not carry a path." -f $Label); exit 2 }
+    if ($u.Query)                { Write-Warning ("REFUSED: {0} must not carry a query." -f $Label); exit 2 }
+    if ($u.UserInfo)             { Write-Warning ("REFUSED: {0} must not carry userinfo." -f $Label); exit 2 }
+    if ($u.Fragment)             { Write-Warning ("REFUSED: {0} must not carry a fragment." -f $Label); exit 2 }
+    return $u
+}
+
+# ---- Load profile ---------------------------------------------------------------
+if (-not (Test-Path -LiteralPath $ProfilePath)) { Write-Warning "BLOCKED: profile not found: $ProfilePath"; exit 3 }
+$profile0 = Get-Content -LiteralPath $ProfilePath -Raw | ConvertFrom-Json
+if (-not $profile0.publicAccessDenied) {
+    Write-Warning 'REFUSED: profile.publicAccessDenied must be true (public/prod denied by default).'
+    exit 2
+}
+$feUrl = Assert-LocalUrl -Url ([string]$profile0.frontendUrl) -Label 'frontendUrl'
+$beUrl = Assert-LocalUrl -Url ([string]$profile0.backendUrl)  -Label 'backendUrl'
+
+$plan = [ordered]@{
+    runId = $RunId
+    mode = $Mode
+    executed = [bool]$Execute
+    frontendUrl = [string]$profile0.frontendUrl
+    backendUrl = [string]$profile0.backendUrl
+    fixtureAttested = [bool]$profile0.fixtureAttested
+    approvalBrowserFixtureAttested = [bool]$profile0.approvalBrowserFixtureAttested
+    approvalBrowserCommandPresent = [bool]$profile0.approvalBrowserCommand
+    apiClassCount = @($script:ApiClasses).Count
+}
+
+if (-not $Execute) {
+    Write-Output 'PLAN MODE - nothing invoked.'
+    Write-Output ("mode={0} frontend={1} backend={2} fixtureAttested={3} approvalFixtureAttested={4}" -f `
+        $Mode, $profile0.frontendUrl, $profile0.backendUrl, $profile0.fixtureAttested, $profile0.approvalBrowserFixtureAttested)
+    Write-Output ("ApiIntegration narrow set: {0} classes (see deploy/e2e/inventory.md)." -f @($script:ApiClasses).Count)
+    Write-Output 'Run with -Execute -Mode <ApiIntegration|StudentBrowser|ApprovalBrowser|All>.'
+    exit 0
+}
+
+# ---- Execute-mode preconditions -------------------------------------------------
+$bookingApiDir = [string]$profile0.bookingApiDir
+$t08Dir = [string]$profile0.t08HarnessDir
+foreach ($p in @($bookingApiDir, $t08Dir)) {
+    if (-not $p -or -not (Test-Path -LiteralPath $p)) {
+        Write-Warning "BLOCKED: profile path placeholder not expanded: '$p'"
+        exit 3
+    }
+}
+$Artifacts = Join-Path $ArtifactRoot "e2e-$Mode-$RunId"
+New-Item -ItemType Directory -Path $Artifacts -Force | Out-Null
+
+function Invoke-ApiIntegration {
+    # Verify every listed class file exists - a missing class BLOCKS; we never
+    # claim coverage that the class set does not provide.
+    $testRoot = Join-Path $bookingApiDir 'src\test\java\com\yu030x\booking'
+    $missing = @()
+    foreach ($rel in $script:ApiClasses) {
+        if (-not (Test-Path -LiteralPath (Join-Path $testRoot ($rel + '.java')))) {
+            $missing += $rel
+        }
+    }
+    if ($missing.Count -gt 0) {
+        Write-Warning ("BLOCKED: missing test classes: {0}" -f ($missing -join ', '))
+        return 3
+    }
+
+    # Env contract: hard-required host vars; derived URLs; credential values
+    # read from the PROFILE-DECLARED env NAMES. Values are never printed.
+    $envMissing = @($script:HardRequiredEnv | Where-Object { -not [Environment]::GetEnvironmentVariable($_) })
+    if ($envMissing.Count -gt 0) {
+        Write-Warning ("BLOCKED: missing required environment variables: {0}" -f ($envMissing -join ', '))
+        return 3
+    }
+    $cred = $profile0.credentials
+    $dbUser   = [Environment]::GetEnvironmentVariable([string]$cred.dbUsernameEnv)
+    $dbPass   = [Environment]::GetEnvironmentVariable([string]$cred.dbPasswordEnv)
+    $jwtValue = [Environment]::GetEnvironmentVariable([string]$cred.jwtSecretEnv)
+    $credMissing = @()
+    if (-not $dbUser)   { $credMissing += [string]$cred.dbUsernameEnv }
+    if (-not $dbPass)   { $credMissing += [string]$cred.dbPasswordEnv }
+    if (-not $jwtValue) { $credMissing += [string]$cred.jwtSecretEnv }
+    if ($credMissing.Count -gt 0) {
+        Write-Warning ("BLOCKED: missing credential environment variables: {0}" -f ($credMissing -join ', '))
+        return 3
+    }
+
+    # Temporary child-process env mapping; EVERY touched var is precisely
+    # restored in finally (removed again if it was absent before).
+    $dbUrl = [Environment]::GetEnvironmentVariable('DB_URL')
+    $mappings = [ordered]@{
+        'DB_USERNAME'               = $dbUser
+        'DB_PASSWORD'               = $dbPass
+        'JWT_SECRET'                = $jwtValue
+        'RESOURCE_MYSQL_USERNAME'   = $dbUser
+        'RESOURCE_MYSQL_PASSWORD'   = $dbPass
+    }
+    $redisPwd = [Environment]::GetEnvironmentVariable([string]$cred.redisPasswordEnv)
+    if ($redisPwd) { $mappings['REDIS_PASSWORD'] = $redisPwd }
+    foreach ($name in $script:DerivedFromDbUrl) {
+        if (-not [Environment]::GetEnvironmentVariable($name)) { $mappings[$name] = $dbUrl }
+    }
+    if (-not [Environment]::GetEnvironmentVariable('REDIS_PORT')) { $mappings['REDIS_PORT'] = '6379' }
+    $mappings['BOOKING_MYSQL8_TEST'] = 'true'
+
+    $saved = @{}
+    foreach ($name in $mappings.Keys) {
+        $saved[$name] = [Environment]::GetEnvironmentVariable($name) # $null == absent
+        [Environment]::SetEnvironmentVariable($name, $mappings[$name])
+    }
+    $classList = ($script:ApiClasses | ForEach-Object { ($_ -split '/')[-1] }) -join ','
+    $logPath = Join-Path $Artifacts 'mvn-integration.log'
+    try {
+        Push-Location $bookingApiDir
+        try {
+            & mvn -B test "-Dtest=$classList" '-DfailIfNoTests=false' 2>&1 |
+                Tee-Object -FilePath $logPath | Out-Null
+            $mvnExit = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+    } finally {
+        foreach ($name in $saved.Keys) {
+            if ($null -eq $saved[$name]) { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue }
+            else { [Environment]::SetEnvironmentVariable($name, $saved[$name]) }
+        }
+    }
+    # Redact the captured log in place (Authorization/passwords/etc.).
+    & node (Join-Path $PSScriptRoot 'redact-artifacts.mjs') $Artifacts | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning ("redaction pass failed with exit {0}" -f $LASTEXITCODE)
+        return 1
+    }
+    if ($mvnExit -ne 0) {
+        Write-Warning ("mvn test exited {0}; log kept (redacted)." -f $mvnExit)
+        return 1
+    }
+    return 0
+}
+
+function Invoke-StudentBrowser {
+    if (-not $profile0.fixtureAttested) {
+        Write-Warning 'BLOCKED: StudentBrowser requires profile.fixtureAttested=true (deterministic fixture owner-attested).'
+        return 3
+    }
+    $t08run = Join-Path $t08Dir 'run.ps1'
+    if (-not (Test-Path -LiteralPath $t08run)) {
+        Write-Warning "BLOCKED: T08 harness entry not found: $t08run"
+        return 3
+    }
+    $savedFe = $env:T08_QA_FRONTEND
+    $savedBe = $env:T08_QA_BACKEND
+    $env:T08_QA_FRONTEND = [string]$profile0.frontendUrl
+    $env:T08_QA_BACKEND  = [string]$profile0.backendUrl
+
+    # Snapshot pre-existing T08 run dirs: ONLY newly created directories count
+    # as evidence for THIS execution - stale runs must never be presented.
+    $existingRunDirs = @(Get-ChildItem -LiteralPath $t08Dir -Directory -Filter 'run-*' -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty FullName)
+
+    try {
+        & $t08run -Action Run
+        $t08Exit = $LASTEXITCODE
+    } finally {
+        $env:T08_QA_FRONTEND = $savedFe
+        $env:T08_QA_BACKEND  = $savedBe
+    }
+
+    $newRunDirs = @(Get-ChildItem -LiteralPath $t08Dir -Directory -Filter 'run-*' -ErrorAction SilentlyContinue |
+        Where-Object { $existingRunDirs -notcontains $_.FullName } |
+        Sort-Object Name -Descending)
+    if ($newRunDirs.Count -eq 0) {
+        Write-Warning 'FAIL: T08 produced NO new run directory - refusing to present stale evidence.'
+        return 1
+    }
+    $src = $newRunDirs[0].FullName
+
+    $copyDir = Join-Path $Artifacts 't08-copy'
+    New-Item -ItemType Directory -Path $copyDir -Force | Out-Null
+    foreach ($name in @('summary.json', 'summary.meta.json', 'REPORT.md', 'network.jsonl', 'api-driver-calls.jsonl', 'console.jsonl')) {
+        $f = Join-Path $src $name
+        if (Test-Path -LiteralPath $f) { Copy-Item -LiteralPath $f -Destination (Join-Path $copyDir $name) -Force }
+    }
+    & node (Join-Path $PSScriptRoot 'redact-artifacts.mjs') $copyDir | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Warning 'redaction pass failed on t08 copy.'; return 1 }
+
+    # Screenshots CANNOT be auto-redacted: copy them into an explicit
+    # "unreviewed" area with a marker + index. Never claimed redacted/pass.
+    $shots = Join-Path $src 'screenshots'
+    if (Test-Path -LiteralPath $shots) {
+        $unreviewed = Join-Path $Artifacts 'screenshots-unreviewed'
+        New-Item -ItemType Directory -Path $unreviewed -Force | Out-Null
+        $index = @()
+        foreach ($png in (Get-ChildItem -LiteralPath $shots -File -Filter '*.png')) {
+            Copy-Item -LiteralPath $png.FullName -Destination (Join-Path $unreviewed $png.Name) -Force
+            $index += $png.Name
+        }
+        Set-Content -LiteralPath (Join-Path $unreviewed 'REQUIRES-MANUAL-VISUAL-PII-REVIEW.txt') `
+            -Value "Every PNG in this directory requires manual visual PII review before any publication. T13 does not claim these screenshots are redacted." -Encoding utf8NoBOM
+        Set-Content -LiteralPath (Join-Path $copyDir 'screenshots.index.txt') `
+            -Value (("requires manual visual PII review`n") + ($index -join "`n")) -Encoding utf8NoBOM
+    }
+
+    if ($t08Exit -ne 0) { Write-Warning ("T08 harness exited {0}." -f $t08Exit); return 1 }
+    return 0
+}
+
+function Invoke-ApprovalBrowser {
+    if (-not $profile0.approvalBrowserFixtureAttested) {
+        Write-Warning 'BLOCKED: ApprovalBrowser requires approvalBrowserFixtureAttested=true (deterministic fixture).'
+        return 3
+    }
+    if (-not $profile0.approvalBrowserCommand) {
+        Write-Warning 'BLOCKED: ApprovalBrowser requires profile.approvalBrowserCommand (owner-approved command/path). Mocks are forbidden.'
+        return 3
+    }
+    # Command contract: a JSON ARRAY whose FIRST element is an EXISTING LOCAL
+    # FILE PATH; remaining elements are arguments. Shell command strings and
+    # PATH guessing are forbidden - no `& $string`, no cmd /c.
+    $rawCmd = $profile0.approvalBrowserCommand
+    if ($rawCmd -is [string] -or $rawCmd -isnot [array]) {
+        Write-Warning 'REFUSED: approvalBrowserCommand must be a JSON array like ["<existing local path>", "<arg>", ...].'
+        return 2
+    }
+    $cmd = @($rawCmd)
+    if ($cmd.Count -lt 1 -or [string]::IsNullOrWhiteSpace([string]$cmd[0])) {
+        Write-Warning 'REFUSED: approvalBrowserCommand[0] (executable path) is empty.'
+        return 2
+    }
+    $exe = [string]$cmd[0]
+    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+        Write-Warning ("REFUSED: approvalBrowserCommand[0] is not an existing local file: '{0}' (PATH guessing forbidden)." -f $exe)
+        return 2
+    }
+    $rest = @($cmd | Select-Object -Skip 1)
+
+    # Even with all conditions satisfied, this lane CANNOT be marked pass:
+    # no deterministic approval browser proof exists yet (OCR-8).
+    Write-Output ("Executing owner-approved executable: {0}" -f $exe)
+    & $exe @rest
+    $cmdExit = $LASTEXITCODE
+    Set-Content -LiteralPath (Join-Path $Artifacts 'approval-browser-status.txt') `
+        -Value ("EXECUTED_UNPROVEN exit={0}`nThis mode never reports pass until an owner-reviewed deterministic fixture and evidence chain exist (OCR-8)." -f $cmdExit) -Encoding utf8NoBOM
+    Write-Warning 'ApprovalBrowser executed but remains UNPROVEN by contract - not a pass.'
+    return 2
+}
+
+$modeResults = [ordered]@{}
+$overall = 0
+$modesToRun = @()
+switch ($Mode) {
+    'All'             { $modesToRun = @('ApiIntegration', 'StudentBrowser', 'ApprovalBrowser') }
+    default           { $modesToRun = @($Mode) }
+}
+
+foreach ($m in $modesToRun) {
+    Write-Output ("==== mode: {0} ====" -f $m)
+    $rc = switch ($m) {
+        'ApiIntegration'  { Invoke-ApiIntegration }
+        'StudentBrowser'  { Invoke-StudentBrowser }
+        'ApprovalBrowser' { Invoke-ApprovalBrowser }
+    }
+    $modeResults[$m] = $rc
+    if ($rc -ne 0) { $overall = $rc }
+}
+
+$plan.modeResults = $modeResults
+$plan.overallExit = $overall
+Set-Content -LiteralPath (Join-Path $Artifacts 'mode-summary.json') `
+    -Value ($plan | ConvertTo-Json -Depth 6) -Encoding utf8NoBOM
+
+foreach ($m in $modeResults.Keys) {
+    Write-Output ("{0}: exit {1}" -f $m, $modeResults[$m])
+}
+if ($overall -ne 0) { Write-Warning ("E2E RUN FAILED/BLOCKED (overall exit {0})." -f $overall); exit $overall }
+Write-Output 'E2E RUN COMPLETE.'
+exit 0

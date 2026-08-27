@@ -1,0 +1,39 @@
+{
+  "$comment": "T13 slice 4 isolated local E2E profile TEMPLATE. Placeholders in <...> must be expanded from an approved fixture before any Execute. NO credential VALUES belong in this file - only environment VARIABLE NAMES. Public/production access is denied by default; every URL is deep-validated as loopback. Static template; never executed.",
+  "publicAccessDenied": true,
+  "runner": {
+    "path": "scripts/tests/t08/run.ps1",
+    "browser": "Chrome --headless=new via raw CDP (no puppeteer)",
+    "approvalBasis": "existing repo authority: the only in-repo browser harness (T08), already redacts tokens/passwords in its evidence"
+  },
+  "frontendUrl": "http://127.0.0.1:4173",
+  "backendUrl": "http://127.0.0.1:18080",
+  "bookingApiDir": "<path-to-booking-api>",
+  "t08HarnessDir": "<path-to-scripts/tests/t08>",
+  "composeFile": "<path-to-deploy/compose.yml>",
+  "disposableNamespace": {
+    "mysqlDatabase": "<t13e2e_<runid>>",
+    "redisKeyPrefix": "t13e2e:<runid>:"
+  },
+  "credentials": {
+    "$note": "ENV NAMES only - values must exist in the host environment at Execute time; missing names are BLOCKED and values are never printed",
+    "dbUsernameEnv": "T13_E2E_DB_USERNAME",
+    "dbPasswordEnv": "T13_E2E_DB_PASSWORD",
+    "jwtSecretEnv": "T13_E2E_JWT_SECRET",
+    "redisPasswordEnv": "T13_E2E_REDIS_PASSWORD"
+  },
+  "integrationEnv": {
+    "$note": "env var NAMES for the env-gated integration tests. DB_URL and REDIS_HOST are hard-required in the host env; RESOURCE_MYSQL_URL/USER_CREDIT_MYSQL_URL are derived from DB_URL when absent; REDIS_PORT defaults to 6379 when absent; DB_USERNAME/DB_PASSWORD/JWT_SECRET/REDIS_PASSWORD are injected from the credential env NAMES above. Values are never printed.",
+    "resourceMysqlUrlEnv": "RESOURCE_MYSQL_URL",
+    "userCreditMysqlUrlEnv": "USER_CREDIT_MYSQL_URL",
+    "dbUrlEnv": "DB_URL",
+    "dbUsernameEnv": "DB_USERNAME",
+    "dbPasswordEnv": "DB_PASSWORD",
+    "redisHostEnv": "REDIS_HOST",
+    "redisPortEnv": "REDIS_PORT",
+    "redisPasswordEnv": "REDIS_PASSWORD"
+  },
+  "fixtureAttested": false,
+  "approvalBrowserFixtureAttested": false,
+  "approvalBrowserCommand": null
+}

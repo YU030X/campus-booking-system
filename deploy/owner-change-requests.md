@@ -73,6 +73,18 @@ RUNTIME-GENERATED 100-row distinct CSV (`token,resourceId,startTime,endTime`;
 artifact — never committed — and its token column is consumed only by JMeter
 at run time; run.ps1 validates structure without recording values.
 
+## OCR-8 (approval owners): deterministic approval-browser fixture + approved command missing
+
+The ApprovalBrowser lane (`deploy/e2e/run.ps1`) requires (1)
+`approvalBrowserFixtureAttested: true` and (2) an owner-approved
+`approvalBrowserCommand`/path. Today neither exists: the in-repo T08 harness
+covers student flows only (its 15 cases include no admin approve/reject UI
+flow), and no deterministic approval fixture has been attested. T13 will not
+mock admins, bookings, or browser outcomes. Consequence: ApprovalBrowser is
+BLOCKED (exit 3) by default and can never report pass in this slice even when
+executed (`EXECUTED_UNPROVEN`, exit 2). Also covers the per-state browser
+refresh matrix gap recorded in `deploy/e2e/inventory.md`.
+
 ## OCR-6 (owner/T08 history): vulnerable-baseline image/artifact unavailable
 
 The `vulnerable-baseline` round requires a runnable stack WITHOUT the
