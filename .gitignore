@@ -2,6 +2,7 @@
 .agents/
 .claude/
 .cursor/
+.pi/
 CLAUDE.md
 
 # Java / Maven / Gradle
@@ -54,3 +55,8 @@ reports/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Business docs (removed from history)
+docs/
+
+handoff.md
