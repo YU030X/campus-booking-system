@@ -64,3 +64,29 @@ Lane D needs a runtime-injected student token and representative
 resource/slot fixture; demo orchestration depends on a T01-owned seed change
 or approved ephemeral fixture (tasks 6.1). Absent either, affected runs are
 BLOCKED by design rather than skipped silently.
+**Concurrency extension**: the same fixture must also supply concrete
+`resourceId/date/time` values for the JMeter same-slot rounds
+(`deploy/jmeter/rounds.example.json` placeholders), a seeded scope where a
+same-slot round can produce exactly 1 success + 99 conflicts, and a
+RUNTIME-GENERATED 100-row distinct CSV (`token,resourceId,startTime,endTime`;
+4 fields; no header; numeric distinct resourceIds). That CSV is a runtime
+artifact — never committed — and its token column is consumed only by JMeter
+at run time; run.ps1 validates structure without recording values.
+
+## OCR-6 (owner/T08 history): vulnerable-baseline image/artifact unavailable
+
+The `vulnerable-baseline` round requires a runnable stack WITHOUT the
+`booking_slot` unique index (`uk_resource_slot`). No such image, compose file,
+or migration variant exists in this repo, and T13 must not create one by
+weakening frozen migrations. Owner request: provide (or attest how to rebuild)
+the historical pre-index artifact in strict isolation. Blocked until then;
+`rounds.example.json` keeps the round `enabled: false` with
+`isolatedHistorical: true` and run.ps1 double-gates execution.
+
+## OCR-7 (owner/T08/T09 history): unique-index-only artifact unverified
+
+The `unique-index-only` round needs a historical image that HAS the unique
+index but predates the Redisson wiring. Which Redis semantics apply must be
+declared by that round's own image configuration; T13 does not guess the
+current implementation. The corresponding historical compose/image artifact is
+not present or attested — round stays blocked as configured.

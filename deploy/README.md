@@ -81,7 +81,12 @@ docker compose --env-file .env down                    # volumes preserved
 | `scripts/restart-persistence-check.ps1` | plan-only default (no secret needed); `-Execute` restarts/recreates with volumes preserved; requires all three containers healthy and proves persistence | authored, never run |
 | `scripts/redis-failure-check.ps1` | T07 fail-closed (409/43000/SYSTEM_BUSY, zero mutation); T12 fallback is BLOCKED_OWNER_WIRING by default (exit 3) until owner wiring lands (`-T12FallbackWired` attestation) | authored, never run |
 | `runbooks/recovery.md` | lanes, rollback doctrine, RPO/RTO operator fields, stop conditions | planning doc |
-| `owner-change-requests.md` | T12 cache-port wiring blocker + external/digest/merge/fixture blockers with file:line evidence | living doc |
+| `owner-change-requests.md` | T12 cache-port wiring blocker + external/digest/merge/fixture/concurrency-history blockers with file:line evidence | living doc |
+| `jmeter/booking-concurrency.jmx` | 5.6.3 plan; 100-thread same-slot group + distinct granularity group, property-gated, no assertions (offline classification) | authored, never run |
+| `jmeter/rounds.example.json` | three-round template; placeholders only; baseline double-gated | authored, never run |
+| `jmeter/run.ps1` | plan default; one round per execution, deep-validated loopback BaseUrl, same-slot token via temp secret props (never argv) with verified cleanup, distinct via validated 100-row runtime CSV path; pre/post row evidence via container auth | authored, never run |
+| `jmeter/summarize.ps1` | offline XML JTL classification (success/business_conflict/system_busy/server/connection/data_error/other) + strict protected 1/99/0 + slot-delta assertions; digest-only redacted reports | authored, never run |
+| `jmeter/README.md` | flow, JTL privacy/redaction, comparability rules, blockers | planning doc |
 | `artifacts/` | raw run evidence; git-ignored except its `.gitignore` | empty until real runs |
 
 All scripts require PowerShell 7, are parameterized, refuse non-local

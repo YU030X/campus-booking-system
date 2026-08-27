@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  T13 booking concurrency plan (slice 3). STATIC ARTIFACT - never executed.
+  Target: JMeter 5.6.3 CLI (-n). Two ThreadGroups, each gated by an IfController
+  bound to a run property; run.ps1 enforces EXACTLY ONE of runSameSlot /
+  runDistinct is true per execution, so scenarios can never mix in one JTL.
+
+  same-slot group : EXACTLY 100 threads, ramp 1, loop 1 (contract 3.2).
+  distinct group  : 100 threads x distinct resourceId (base + threadNum),
+                    separate date/time props - lock-granularity probe only;
+                    the 1/99 assertion never applies to it.
+
+  Classification is done OFFLINE by summarize.ps1 from saved response bodies.
+  NO Response Assertions exist here on purpose: JMeter must not pre-label 409s
+  as "business conflicts" - HTTP 409 + code 43000 SYSTEM_BUSY is a separate
+  system error class and only body inspection can tell them apart.
+
+  Privacy: request headers (Authorization) are never saved; run.ps1 supplies
+  jmeter.properties that keep request_headers/samplerData out of the XML JTL,
+  and scrubs any leaked token bytes afterwards (defense in depth).
+-->
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="T13 booking concurrency" enabled="true">
+      <stringProp name="TestPlan.comments">T13 slice 3 - offline-classified concurrency probe. No assertions; classification by summarize.ps1.</stringProp>
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.tearDown_on_shutdown">true</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+        <collectionProp name="Arguments.arguments"/>
+      </elementProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+
+      <!-- ==================== same-slot: EXACT 100 threads ==================== -->
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="same-slot booking - exactly 100 threads" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">100</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">1</stringProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+      </ThreadGroup>
+      <hashTree>
+        <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="booking headers" enabled="true">
+          <collectionProp name="HeaderManager.headers">
+            <elementProp name="" elementType="Header">
+              <stringProp name="Header.name">Authorization</stringProp>
+              <stringProp name="Header.value">Bearer ${__P(T13StudentToken,)}</stringProp>
+            </elementProp>
+            <elementProp name="" elementType="Header">
+              <stringProp name="Header.name">Content-Type</stringProp>
+              <stringProp name="Header.value">application/json</stringProp>
+            </elementProp>
+          </collectionProp>
+        </HeaderManager>
+        <hashTree/>
+        <IfController guiclass="IfControllerPanel" testclass="IfController" testname="gate: runSameSlot" enabled="true">
+          <stringProp name="IfController.condition">${__jexl3(${__P(runSameSlot,true)})}</stringProp>
+          <boolProp name="IfController.useExpression">true</boolProp>
+          <boolProp name="IfController.evaluateAll">false</boolProp>
+        </IfController>
+        <hashTree>
+          <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POST /api/v1/bookings same-slot" enabled="true">
+            <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+              <collectionProp name="Arguments.arguments">
+                <elementProp name="" elementType="HTTPArgument">
+                  <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                  <stringProp name="Argument.value">{&quot;resourceId&quot;:&quot;${__P(sameSlotResourceId,1)}&quot;,&quot;startTime&quot;:&quot;${__P(sameSlotStartTime,2027-01-01 10:00:00)}&quot;,&quot;endTime&quot;:&quot;${__P(sameSlotEndTime,2027-01-01 11:00:00)}&quot;,&quot;purpose&quot;:&quot;T13 same-slot concurrency probe&quot;,&quot;attendeeCount&quot;:1}</stringProp>
+                  <stringProp name="Argument.metadata">=</stringProp>
+                </elementProp>
+              </collectionProp>
+            </elementProp>
+            <stringProp name="HTTPSampler.domain">${__P(baseUrlHost,127.0.0.1)}</stringProp>
+            <stringProp name="HTTPSampler.port">${__P(baseUrlPort,80)}</stringProp>
+            <stringProp name="HTTPSampler.protocol">${__P(baseUrlProtocol,http)}</stringProp>
+            <stringProp name="HTTPSampler.path">/api/v1/bookings</stringProp>
+            <stringProp name="HTTPSampler.method">POST</stringProp>
+            <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+            <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+            <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+            <boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp>
+            <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+            <stringProp name="HTTPSampler.embedded_url_re"></stringProp>
+            <stringProp name="HTTPSampler.connect_timeout">5000</stringProp>
+            <stringProp name="HTTPSampler.response_timeout">30000</stringProp>
+          </HTTPSamplerProxy>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+
+      <!-- ============ distinct resource/date: lock-granularity probe ==========
+           Fixture comes from a runtime-generated 100-row CSV
+           (token,resourceId,startTime,endTime; 4 fields; NO header line;
+           variableNames supplies the names). run.ps1 validates exactly 100
+           rows / distinct numeric ids / non-empty tokens and passes ONLY the
+           path via -JdistinctCsvPath; token values stay runtime-only. -->
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="distinct resource/date booking - granularity probe" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">100</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">1</stringProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+      </ThreadGroup>
+      <hashTree>
+        <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="booking headers" enabled="true">
+          <collectionProp name="HeaderManager.headers">
+            <elementProp name="" elementType="Header">
+              <stringProp name="Header.name">Authorization</stringProp>
+              <stringProp name="Header.value">Bearer ${token}</stringProp>
+            </elementProp>
+            <elementProp name="" elementType="Header">
+              <stringProp name="Header.name">Content-Type</stringProp>
+              <stringProp name="Header.value">application/json</stringProp>
+            </elementProp>
+          </collectionProp>
+        </HeaderManager>
+        <hashTree/>
+        <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="distinct fixture csv" enabled="true">
+          <stringProp name="filename">${__P(distinctCsvPath,)}</stringProp>
+          <stringProp name="fileEncoding">UTF-8</stringProp>
+          <stringProp name="variableNames">token,resourceId,startTime,endTime</stringProp>
+          <boolProp name="ignoreFirstLine">false</boolProp>
+          <stringProp name="delimiter">,</stringProp>
+          <boolProp name="quotedData">false</boolProp>
+          <boolProp name="recycle">false</boolProp>
+          <boolProp name="stopThread">true</boolProp>
+          <stringProp name="shareMode">shareMode.all</stringProp>
+        </CSVDataSet>
+        <hashTree/>
+        <IfController guiclass="IfControllerPanel" testclass="IfController" testname="gate: runDistinct" enabled="true">
+          <stringProp name="IfController.condition">${__jexl3(${__P(runDistinct,false)})}</stringProp>
+          <boolProp name="IfController.useExpression">true</boolProp>
+          <boolProp name="IfController.evaluateAll">false</boolProp>
+        </IfController>
+        <hashTree>
+          <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POST /api/v1/bookings distinct resource" enabled="true">
+            <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+              <collectionProp name="Arguments.arguments">
+                <elementProp name="" elementType="HTTPArgument">
+                  <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                  <stringProp name="Argument.value">{&quot;resourceId&quot;:&quot;${resourceId}&quot;,&quot;startTime&quot;:&quot;${startTime}&quot;,&quot;endTime&quot;:&quot;${endTime}&quot;,&quot;purpose&quot;:&quot;T13 distinct-resource granularity probe&quot;,&quot;attendeeCount&quot;:1}</stringProp>
+                  <stringProp name="Argument.metadata">=</stringProp>
+                </elementProp>
+              </collectionProp>
+            </elementProp>
+            <stringProp name="HTTPSampler.domain">${__P(baseUrlHost,127.0.0.1)}</stringProp>
+            <stringProp name="HTTPSampler.port">${__P(baseUrlPort,80)}</stringProp>
+            <stringProp name="HTTPSampler.protocol">${__P(baseUrlProtocol,http)}</stringProp>
+            <stringProp name="HTTPSampler.path">/api/v1/bookings</stringProp>
+            <stringProp name="HTTPSampler.method">POST</stringProp>
+            <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+            <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+            <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+            <boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp>
+            <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+            <stringProp name="HTTPSampler.embedded_url_re"></stringProp>
+            <stringProp name="HTTPSampler.connect_timeout">5000</stringProp>
+            <stringProp name="HTTPSampler.response_timeout">30000</stringProp>
+          </HTTPSamplerProxy>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>
