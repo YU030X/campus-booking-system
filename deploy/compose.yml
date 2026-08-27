@@ -96,6 +96,11 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # Enables the booking.cache.enabled bean wiring (default false in code).
+      # NOTE: enabling this does NOT make availability reads cache-backed;
+      # AvailabilityService does not consume AvailabilityCachePort yet - owner
+      # blocker tracked in deploy/owner-change-requests.md.
+      BOOKING_CACHE_ENABLED: ${BOOKING_CACHE_ENABLED:-true}
       SPRINGDOC_ENABLED: ${SPRINGDOC_ENABLED:-false}
     expose:
       - "8080"
