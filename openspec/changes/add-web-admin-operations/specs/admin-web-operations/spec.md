@@ -22,7 +22,7 @@ The capability MUST reuse exactly `/admin/approvals` and `/admin/users` from the
 
 ### Requirement: Pending approval list and exact backend contract
 
-The approvals view MUST consume `GET /api/v1/admin/approvals` with `pageNumber` and `pageSize`, never sending `pageSize > 100`. It MUST request and display only non-deleted records whose server-returned status is `PENDING_APPROVAL`, preserving the backend's deterministic `createdAt ASC,id ASC` ordering and canonical page envelope. It MUST preserve every `BookingView`/`ApprovalView` Long identifier as a decimal JSON string, render server timestamps in `yyyy-MM-dd HH:mm:ss` Asia/Shanghai form, and use the exact frozen status vocabulary. The final request/response field mapping is gated on the T09 sibling handoff after its merge/rebase commit is recorded; the frontend MUST NOT invent or infer fields absent from that reread.
+The approvals view MUST consume `GET /api/v1/admin/approvals` with `pageNumber` and `pageSize`, never sending `pageSize > 100`. It MUST request and display only non-deleted records whose server-returned status is `PENDING_APPROVAL`, preserving the backend's deterministic `createdAt ASC,id ASC` ordering and canonical `PageResult<BookingView>` envelope. It MUST preserve every `BookingView` Long identifier as a decimal JSON string, render server timestamps in `yyyy-MM-dd HH:mm:ss` Asia/Shanghai form, and use the exact frozen status vocabulary. Selected-item detail MUST be rendered only from a returned list item or approve/reject `BookingView`; because T09 exposes no separate approval-detail endpoint, the frontend MUST NOT issue or invent one.
 
 #### Scenario: pending page
 
@@ -36,7 +36,7 @@ The approvals view MUST consume `GET /api/v1/admin/approvals` with `pageNumber` 
 
 ### Requirement: Approval actions, validation, confirmation, and recovery
 
-Approve MUST call `POST /api/v1/admin/bookings/{id}/approve` with the exact T09 request contract; its optional comment MUST be trimmed, map blank to `null`, and contain at most 500 Unicode code points. Reject MUST call `POST /api/v1/admin/bookings/{id}/reject` with the exact T09 request contract; its comment MUST be trimmed and contain 1..500 Unicode code points. Both actions MUST require a two-step confirmation before sending, disable duplicate submission while loading, and allow only records currently returned as `PENDING_APPROVAL` to expose the action. Repeating the same action after its target state is reached MUST be treated as HTTP 200 with no side effects; an opposite or otherwise illegal action MUST surface HTTP 409/code `43000`, never as a fabricated success. On success, the client MUST refresh the pending list and the affected detail/status from server truth. On failure, it MUST refetch server truth, surface actionable 401/403/404/409 messaging, and preserve useful user-entered form input where safe.
+Approve MUST call `POST /api/v1/admin/bookings/{id}/approve` with the exact T09 request contract; its optional comment MUST be trimmed, map blank to `null`, and contain at most 500 Unicode code points. Reject MUST call `POST /api/v1/admin/bookings/{id}/reject` with the exact T09 request contract; its comment MUST be trimmed and contain 1..500 Unicode code points. Both actions MUST require a two-step confirmation before sending, disable duplicate submission while loading, and allow only records currently returned as `PENDING_APPROVAL` to expose the action. Repeating the same action after its target state is reached MUST be treated as HTTP 200 with no side effects; an opposite or otherwise illegal action MUST surface HTTP 409/code `43000`, never as a fabricated success. On success, the client MUST reconcile selected-item detail from the action-returned `BookingView` and refresh the pending list. On failure, it MUST refetch the pending list, surface actionable 401/403/404/409 messaging, preserve useful user-entered form input where safe, and make no separate detail request.
 
 #### Scenario: reject validation blocks a request
 
@@ -51,12 +51,12 @@ Approve MUST call `POST /api/v1/admin/bookings/{id}/approve` with the exact T09 
 #### Scenario: successful action refreshes truth
 
 - **WHEN** the backend accepts an approve or reject action
-- **THEN** the client refetches the pending list and affected detail/status, removes or updates the item only according to the returned response, and clears transient action state.
+- **THEN** the client reconciles selected-item detail from the returned `BookingView`, refetches the pending list, removes or updates the item only according to server truth, and clears transient action state.
 
 #### Scenario: failed action refetches truth
 
 - **WHEN** the backend returns 401, 403, 404, or 409, or another actionable failure
-- **THEN** the client shows the mapped error, refetches the relevant list/detail, preserves useful unsent form input, and never claims a state transition that the server did not return.
+- **THEN** the client shows the mapped error, refetches the pending list, preserves useful unsent form input, issues no invented detail request, and never claims a state transition that the server did not return.
 
 ### Requirement: Administrator user list, filters, and pagination
 

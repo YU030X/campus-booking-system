@@ -242,15 +242,15 @@ export function createAdminUsersCore(transport) {
 }
 
 export async function openAdminUsersApi() {
-  const [{ http }, { unwrap }] = await Promise.all([import('./http'), import('./resourceCatalog')]);
+  const [{ http }, { unwrapResult }] = await Promise.all([import('./http'), import('./adminEnvelope')]);
   const guarded = (error) => {
     throw mapAdminUserError(error);
   };
   return {
-    list: (params) => http.get('/admin/users', { params }).then(unwrap).catch(guarded),
+    list: (params) => http.get('/admin/users', { params }).then(unwrapResult).catch(guarded),
     updateStatus: (id, status) => http
       .patch(`/admin/users/${encodeURIComponent(assertUserId(id))}/status`, { status: normalizeTargetStatus(status) })
-      .then(unwrap)
+      .then(unwrapResult)
       .catch(guarded),
   };
 }
