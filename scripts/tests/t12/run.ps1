@@ -1,9 +1,9 @@
-# T12 operation-log / availability-cache / notification slices harness
+# T12 operation-log / availability-cache / notification / statistics slices harness
 # Reusable acceptance/regression harness for scripts/tests/t12 scope.
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('Check', 'List', 'OperationLog', 'Cache', 'Notifications', 'Unit')]
+    [ValidateSet('Check', 'List', 'OperationLog', 'Cache', 'Notifications', 'Statistics', 'Unit')]
     [string]$Mode = 'Check'
 )
 
@@ -14,7 +14,8 @@ $apiDir = Join-Path $repoRoot 'booking-api'
 $slices = @(
     @{ Name = 'operation-log'; Main = 'src/main/java/com/yu030x/booking/log'; Test = 'src/test/java/com/yu030x/booking/log'; Selector = 'com.yu030x.booking.log.**' },
     @{ Name = 'cache';         Main = 'src/main/java/com/yu030x/booking/cache'; Test = 'src/test/java/com/yu030x/booking/cache'; Selector = 'com.yu030x.booking.cache.**' },
-    @{ Name = 'notifications'; Main = 'src/main/java/com/yu030x/booking/notification'; Test = 'src/test/java/com/yu030x/booking/notification'; Selector = 'com.yu030x.booking.notification.**' }
+    @{ Name = 'notifications'; Main = 'src/main/java/com/yu030x/booking/notification'; Test = 'src/test/java/com/yu030x/booking/notification'; Selector = 'com.yu030x.booking.notification.**' },
+    @{ Name = 'statistics';    Main = 'src/main/java/com/yu030x/booking/statistics'; Test = 'src/test/java/com/yu030x/booking/statistics'; Selector = 'com.yu030x.booking.statistics.**' }
 )
 
 # Strongly forbidden shared/owner paths: any local drift here aborts the check.
@@ -89,6 +90,7 @@ switch ($Mode) {
     'OperationLog' { Invoke-SliceTests $slices[0].Selector }
     'Cache'        { Invoke-SliceTests $slices[1].Selector }
     'Notifications'{ Invoke-SliceTests $slices[2].Selector }
+    'Statistics'   { Invoke-SliceTests $slices[3].Selector }
     'Unit' {
         $combined = ($slices | ForEach-Object { $_.Selector }) -join ','
         Invoke-SliceTests $combined
