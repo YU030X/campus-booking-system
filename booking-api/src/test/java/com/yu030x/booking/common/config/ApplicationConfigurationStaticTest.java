@@ -14,6 +14,9 @@ class ApplicationConfigurationStaticTest {
         assertThat(yaml).contains("url: ${DB_URL}", "username: ${DB_USERNAME}", "password: ${DB_PASSWORD}")
                 .contains("characterEncoding: UTF-8")
                 .contains("enabled: ${SPRINGDOC_ENABLED:false}")
+                .contains("org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration")
+                .contains("org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration")
+                .contains("org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration")
                 .doesNotContain("jdbc:h2", "password: root");
     }
 }

@@ -29,6 +29,8 @@ Use four spaces in Java and two in Vue, JavaScript, YAML, and JSON. Use `PascalC
 
 Name unit tests `*Test.java` and API/database tests `*IntegrationTest.java`. Cover slot boundaries, state transitions, slot release, authorization, and concurrent conflicts. Record exact commands and results; never claim unrun checks passed.
 
+可复用验收、回归和环境测试脚本必须保存在仓库的 `scripts/tests/<scope>/` 下，并提供单一、文档化的调用入口（Windows 优先使用 `run.ps1`）。执行测试前必须先检查并复用已有脚本；只有确实缺少覆盖时才新增或修改脚本，禁止在会话、`target/` 或临时目录中重复编写等价 harness。脚本至少应支持静态检查和用例列表；涉及浏览器时还应支持 headless smoke 与真实运行入口。生成的截图、日志、凭据和运行证据必须被局部 `.gitignore` 排除，且不得在脚本中写入真实秘密。
+
 ## Commit & Pull Request Guidelines
 
 Use Conventional Commits, e.g. `feat: add booking slot discretization` or `fix: release slots after rejection`. Codex branches use `codex/<openspec-change-name>`. Follow [CONTRIBUTING.md](CONTRIBUTING.md) and use the [pull request template](.github/pull_request_template.md).

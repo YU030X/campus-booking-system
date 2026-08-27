@@ -4,7 +4,7 @@ import com.yu030x.booking.common.api.Result;
 import com.yu030x.booking.user.UserView;
 import com.yu030x.booking.user.UserMapper;
 import jakarta.validation.Valid;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/v1/auth")
-@ConditionalOnBean(UserMapper.class)
+@ConditionalOnProperty(prefix = "booking.identity", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class AuthController {
     private final AuthService authService;
 
