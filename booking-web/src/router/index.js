@@ -6,6 +6,8 @@ import Login from '../views/auth/Login.vue';
 import Register from '../views/auth/Register.vue';
 import ResourceList from '../views/resources/List.vue';
 import ResourceDetail from '../views/resources/Detail.vue';
+import MyBookingList from '../views/my-bookings/List.vue';
+import MyBookingDetail from '../views/my-bookings/Detail.vue';
 import Categories from '../views/admin/categories/Index.vue';
 import AdminResources from '../views/admin/resources/Index.vue';
 import Rules from '../views/admin/rules/Index.vue';
@@ -18,8 +20,8 @@ const routes = [
   { path: '/register', component: Register, meta: { public: true } },
   { path: '/resources', component: ResourceList, meta: { roles: studentRoles } },
   { path: '/resources/:id', component: ResourceDetail, meta: { roles: studentRoles } },
-  { path: '/bookings', component: Placeholder('Bookings'), meta: { roles: studentRoles } },
-  { path: '/bookings/:id', component: Placeholder('Booking detail'), meta: { roles: studentRoles } },
+  { path: '/bookings', component: MyBookingList, meta: { roles: studentRoles } },
+  { path: '/bookings/:id', component: MyBookingDetail, meta: { roles: studentRoles } },
   { path: '/admin/categories', component: Categories, meta: { roles: ['ADMIN'] } },
   { path: '/admin/resources', component: AdminResources, meta: { roles: ['ADMIN'] } },
   { path: '/admin/rules', component: Rules, meta: { roles: ['ADMIN'] } },
