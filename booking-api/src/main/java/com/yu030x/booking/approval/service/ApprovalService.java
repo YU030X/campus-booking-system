@@ -9,6 +9,7 @@ import com.yu030x.booking.booking.vo.BookingView;
 import com.yu030x.booking.common.api.PageResult;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
+import com.yu030x.booking.log.annotation.OperationLog;
 import com.yu030x.booking.violation.port.ViolationPort;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -65,6 +66,7 @@ public class ApprovalService {
     }
 
     @Transactional
+    @OperationLog("booking_approve")
     public BookingView approve(long bookingId, long approverId, String comment) {
         BookingActionOutcome outcome = bookingActions.approve(bookingId);
         return conclude(outcome, bookingId, approverId, ACTION_APPROVE, comment,
@@ -72,6 +74,7 @@ public class ApprovalService {
     }
 
     @Transactional
+    @OperationLog("booking_reject")
     public BookingView reject(long bookingId, long approverId, String comment) {
         BookingActionOutcome outcome = bookingActions.reject(bookingId);
         return conclude(outcome, bookingId, approverId, ACTION_REJECT, comment,
@@ -79,6 +82,7 @@ public class ApprovalService {
     }
 
     @Transactional
+    @OperationLog("booking_cancel")
     public BookingView cancel(long userId, long bookingId, String cancelReason) {
         LocalDateTime actionTime = LocalDateTime.now(clock);
         BookingActionOutcome outcome = bookingActions.cancel(bookingId, userId, actionTime, cancelReason);

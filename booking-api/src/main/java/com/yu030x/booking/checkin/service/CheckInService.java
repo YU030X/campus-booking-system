@@ -7,6 +7,7 @@ import com.yu030x.booking.booking.vo.BookingView;
 import com.yu030x.booking.common.api.BookingStatus;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
+import com.yu030x.booking.log.annotation.OperationLog;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -38,6 +39,7 @@ public class CheckInService {
         this.zoneId = zoneId;
     }
 
+    @OperationLog("booking_check_in")
     public BookingView checkIn(long userId, long bookingId) {
         BookingView current = bookingService.detail(userId, bookingId);
         if (current.status() == BookingStatus.CHECKED_IN) {
