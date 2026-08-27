@@ -1,0 +1,4 @@
+run-*/
+tmp-smoke/
+*.log
+*.tmp
