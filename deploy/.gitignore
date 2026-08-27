@@ -1,0 +1,2 @@
+# Local environment files carry generated secrets; never commit them.
+.env

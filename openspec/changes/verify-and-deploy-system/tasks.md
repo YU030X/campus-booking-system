@@ -23,9 +23,13 @@
 ## 4. Container and Nginx deployment plan
 
 - [ ] 4.1 Add the JDK 17 backend Dockerfile and frontend build-plus-Nginx Dockerfile with pinned non-floating base references, digest recording, non-root settings where practical, and no secret material.
+  - Partial (slice 1, static only): `deploy/api/Dockerfile` + `deploy/web/Dockerfile` authored with pinned ARG tags, non-root users (uid 10001 / nginx 101), jar/dist-only copies, lockfile fail-closed guard; tag→digest pairs NOT yet resolved, no build performed — still unchecked pending digests + real build evidence.
 - [ ] 4.2 Add Compose services for Nginx/API/MySQL 8/Redis with private DB/Redis networks, no MySQL/Redis host ports, public 80/443 only, named volumes, healthchecks, restart policies, dependency ordering, resource limits, and bounded logging.
+  - Partial (slice 1, static only): `deploy/compose.yml` authored with `internal: true` backend network, no DB/Redis ports, loopback-default edge publish, healthchecks/depends_on conditions/mem+cpu/json-log bounds, `${VAR:?}` secret gating; `docker compose config` NOT run, health probes untested — still unchecked.
 - [ ] 4.3 Add Nginx SPA fallback and `/api` proxy configuration with security headers, request-body limits, upstream timeouts, internal-address hiding, and certificate/key mounts without committed keys.
+  - Partial (slice 1, static only): `deploy/nginx/default.conf` authored (8080 listen, try_files fallback, `/api` prefix-strip proxy to api:8080, headers/body limit/timeouts/hide-upstream); TLS left as commented placeholder per authorization gate; CSP not browser-validated, config not loaded — still unchecked.
 - [ ] 4.4 Add a non-secret `.env.example` documenting required runtime variables, image pin/digest update procedure, certificate renewal steps, and the distinction between local compose validation and external deployment acceptance.
+  - Partial (slice 1, static only): `deploy/.env.example`, `deploy/.gitignore`, `deploy/README.md` added (placeholders only; local-vs-external gates, digest procedure, cert/renewal steps documented as not-run); values never exercised by an actual run — still unchecked.
 
 ## 5. Migration, backup, restore, and recovery runbooks
 
