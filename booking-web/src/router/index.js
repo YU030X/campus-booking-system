@@ -12,6 +12,8 @@ import Categories from '../views/admin/categories/Index.vue';
 import AdminResources from '../views/admin/resources/Index.vue';
 import Rules from '../views/admin/rules/Index.vue';
 import Closures from '../views/admin/closures/Index.vue';
+import AdminApprovals from '../views/admin/approvals/Index.vue';
+import AdminUsers from '../views/admin/users/Index.vue';
 
 const Placeholder = (title) => ({ render: () => h('section', [h('h2', title), h('p', 'Feature page placeholder')]) });
 const studentRoles = ['STUDENT', 'ADMIN'];
@@ -26,8 +28,8 @@ const routes = [
   { path: '/admin/resources', component: AdminResources, meta: { roles: ['ADMIN'] } },
   { path: '/admin/rules', component: Rules, meta: { roles: ['ADMIN'] } },
   { path: '/admin/closures', component: Closures, meta: { roles: ['ADMIN'] } },
-  { path: '/admin/approvals', component: Placeholder('Admin approvals'), meta: { roles: ['ADMIN'] } },
-  { path: '/admin/users', component: Placeholder('Admin users'), meta: { roles: ['ADMIN'] } },
+  { path: '/admin/approvals', component: AdminApprovals, meta: { roles: ['ADMIN'] } },
+  { path: '/admin/users', component: AdminUsers, meta: { roles: ['ADMIN'] } },
 ];
 
 const router = createRouter({ history: createWebHistory(), routes });
