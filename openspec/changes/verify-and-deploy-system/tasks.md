@@ -1,8 +1,11 @@
 ## 1. Preconditions and ownership gates
 
-- [ ] 1.1 Record the exact baseline commit (`0e53b7efec27f5821056bd546b8a245144414fdb`) and confirm the dedicated worktree/branch; do not reinterpret the missing `main0e53b7e` ref as a different commit.
+- [x] 1.1 Record the exact baseline commit (`0e53b7efec27f5821056bd546b8a245144414fdb`) and confirm the dedicated worktree/branch; do not reinterpret the missing `main0e53b7e` ref as a different commit.
+  - Evidence (slice 5): baseline + absolute worktree path + branch `codex/verify-and-deploy-system` recorded in `deploy/evidence/preconditions.md` §1; missing ref name documented as a missing ref, not a different commit.
 - [ ] 1.2 Index the existing T04–T12 and Redis-sibling planning artifacts by owner/path, then collect proof of P0 merge, rebase onto the selected baseline, and spec sync; record T12 optional cuts (statistics → notifications → cache). Existing but unmerged or unsynced planning artifacts do not satisfy the evidence gate; keep the change Draft when any proof is missing.
-- [ ] 1.3 Publish an ownership map for allowed T13 paths (integration/E2E tests, JMeter, `deploy/**`, deployment/performance/runbook/demo docs) and a stop-and-request template for T01–T12 defects or shared-file changes.
+  - Partial (slice 5): index + exact merge commits (`1753903` main, `652513b` T09 incl. T07/T10, `240a7b2` T08, `974a213` T11, `13c51e0` T12) recorded in `deploy/evidence/preconditions.md` §2–3. NOT in main yet, delta specs unsynced, owner-rebase proof uncollected — gate partial, change stays Draft; unchecked.
+- [x] 1.3 Publish an ownership map for allowed T13 paths (integration/E2E tests, JMeter, `deploy/**`, deployment/performance/runbook/demo docs) and a stop-and-request template for T01–T12 defects or shared-file changes.
+  - Evidence (slice 5): ownership map (allowed/forbidden paths) + stop-and-request template published in `deploy/evidence/preconditions.md` §4–5; live requests tracked in `deploy/owner-change-requests.md`.
 - [ ] 1.4 Select and document the approved headless CLI/browser runner available in the apply environment; if unavailable, mark E2E execution blocked rather than substituting unapproved tooling silently.
   - Partial (slice 4, static only): runner SELECTED and documented = repo-internal `scripts/tests/t08/run.ps1` (`-Action Run`) + Chrome `--headless=new` raw CDP — the only in-repo browser harness (approval rationale in `deploy/e2e/README.md`); recorded in `deploy/e2e/profile.example.json`. The apply-environment AVAILABILITY check (Chrome/node actually present and runnable) has NOT been executed, so the task stays unchecked.
 
@@ -57,20 +60,30 @@
 ## 6. Demo orchestration and evidence
 
 - [ ] 6.1 Request or reference a T01-owned seed change or define an ephemeral runtime fixture; keep the empty-migration lane seed-free and stop if ownership is not approved.
+  - Partial (slice 5): ephemeral runtime fixture DESIGNED (`deploy/demo/profile.example.json`, `deploy/demo/run.ps1` Setup; fixtureOwner = T13 ephemeral runtime fixture; empty-migration lane stays seed-free). Owner attestation not granted (OCR-5), nothing executed — still unchecked.
 - [ ] 6.2 Generate deterministic non-PII admin/student/resource/booking/violation data with strong runtime-injected passwords; redact credentials from logs and evidence.
+  - Partial (slice 5, static only): Setup authored — RNG 32-byte passwords never printed/persisted (temp secret JSON, verified finally deletion + rotation), PII fields left null (realName=T13Fixture*), usernames run-id derived; deterministic PENDING booking + EPHEMERAL-LABELED past CONFIRMED seed left to the OWNER no-show scan. Not executed — still unchecked.
 - [ ] 6.3 Add setup/teardown orchestration scoped to the fixture-owned database/volume and a demo script covering the required lifecycle and authorization steps.
+  - Partial (slice 5, static only): run.ps1 authored with Setup/StudentFlow/Teardown/All; teardown deletes ONLY exact fixture usernames/purposes/resource id (no LIKE wildcards, children-first, verified leftovers, pre/post totals recorded); never drops database/volume/foreign rows; missing fixture map BLOCKS. Not executed — still unchecked.
 - [ ] 6.4 Produce a redacted evidence bundle mapping screenshots/network traces to acceptance requirements and mark the demo gate Draft when setup, owner approval, or evidence is incomplete.
+  - Partial (slice 5, static only): `deploy/demo/evidence-index.template.md` authored (requirement→artifact mapping, all NOT RUN/DRAFT; approval row permanently BLOCKED per OCR-8; screenshots row requires manual visual PII review); StudentFlow appends redacted-evidence mappings to the run evidence index. No demo run exists — still unchecked.
 
 ## 7. Local verification gates
 
 - [ ] 7.1 Run `cd booking-api && mvn verify` on JDK 17 and preserve the actual output.
 - [ ] 7.2 Run a clean frontend install/build using the repository-pinned lockfile and preserve the actual output; do not modify package manifests in T13.
 - [ ] 7.3 Run strict OpenSpec change validation, main-spec validation after any future sync, and `git diff --check`; record unexecuted checks explicitly.
+  - Partial (slice 6, static only): `deploy/evidence/verification-matrix.md` defines the strict validation commands and evidence locations; no OpenSpec validator or diff check has been executed in this slice, so this remains unchecked.
 - [ ] 7.4 Run compose config, image/dependency/artifact scan, secret scan, health smoke, empty migration, backup/restore, restart persistence, Redis failure, and local headless E2E checks; attach raw evidence and classify failures.
+  - Partial (slice 6, static only): the verification matrix maps each check to its reusable entrypoint, preconditions, raw artifact path, and pass criterion; no runtime gate has been executed and all evidence rows remain NOT RUN/BLOCKED as applicable.
 - [ ] 7.5 Review changed paths against ownership and verify no `.env`, key, token, password, PII, build output, migration edit, or public DB/Redis port is present.
+  - Partial (slice 6, static only): ownership and secret-safety review procedure is recorded in `deploy/evidence/preconditions.md` and `deploy/evidence/verification-matrix.md`; final changed-path scan and artifact scan remain unexecuted.
 
 ## 8. External acceptance gate
 
 - [ ] 8.1 Obtain explicit user authorization for the target host/domain, DNS ownership, TLS certificate/renewal mechanism, and any required credentials before attempting public acceptance.
+  - Partial (slice 6, static only): external acceptance prerequisites and refusal rule are documented; no target, DNS ownership, TLS path, or deployment credentials have been authorized.
 - [ ] 8.2 If authorization and infrastructure are provided, run the documented deployment, HTTPS, public smoke, rollback, and monitoring checks without automatic spend/provisioning; otherwise mark these tasks not run/blocked.
+  - Partial (slice 6, static only): public deployment is explicitly not run and no automatic provisioning/spend is permitted; external gate remains blocked pending task 8.1 inputs.
 - [ ] 8.3 Keep the PR/change Draft until T04–T12 gates, all required local evidence, spec sync, and any authorized external checks are complete; never claim public URL, domain, or certificate completion from local evidence alone.
+  - Partial (slice 6, static only): current change remains Draft because merge/spec-sync/owner evidence and all runtime/external checks are incomplete; no public completion claim is made.

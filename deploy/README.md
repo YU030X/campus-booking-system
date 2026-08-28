@@ -92,6 +92,12 @@ docker compose --env-file .env down                    # volumes preserved
 | `e2e/redact-artifacts.mjs` | offline artifact redactor; manifest path/rule/count only; residual-scan exit 2 | authored, never run |
 | `e2e/inventory.md` | requirement → real `file:class` coverage map + browser cases + honest gaps | authored |
 | `e2e/README.md` | runner approval rationale, flow, redaction, blockers | planning doc |
+| `evidence/preconditions.md` | baseline/worktree record, integration merge evidence (partial gate), T04–T12 owner index, T13 ownership map + stop-and-request template, runner selection | living evidence doc |
+| `evidence/verification-matrix.md` | local/external verification gates, exact commands, evidence paths, pass criteria, and current blockers | DRAFT, nothing run |
+| `demo/profile.example.json` | ephemeral demo fixture profile template (loopback, env NAMES only, publicDenied) | authored, never run |
+| `demo/run.ps1` | Setup/StudentFlow/Teardown/All; RNG passwords in verified temp secret file; scope-limited teardown; EPHEMERAL-SETUP labeling | authored, never run |
+| `demo/evidence-index.template.md` | requirement→artifact mapping; all NOT RUN/DRAFT placeholders | template |
+| `demo/README.md` | ephemeral-vs-seed contract, safety, generated passwords, Draft evidence, blockers | planning doc |
 | `artifacts/` | raw run evidence; git-ignored except its `.gitignore` | empty until real runs |
 
 All scripts require PowerShell 7, are parameterized, refuse non-local
