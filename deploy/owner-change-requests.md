@@ -110,3 +110,25 @@ index but predates the Redisson wiring. Which Redis semantics apply must be
 declared by that round's own image configuration; T13 does not guess the
 current implementation. The corresponding historical compose/image artifact is
 not present or attested — round stays blocked as configured.
+
+## OCR-9 (T12): AvailabilityCacheKey does not compile on JDK 17
+
+Status: OPEN - blocks `mvn verify` and any T12 cache implementation evidence.
+
+Evidence from the authorized local run on 2026-08-28:
+
+* Command: `cd booking-api; mvn -o -B verify`, with
+  `JAVA_HOME=C:\Users\yuu\scoop\apps\temurin17-jdk\current`.
+* Result: Maven compiler failed at
+  `booking-api/src/main/java/com/yu030x/booking/cache/key/AvailabilityCacheKey.java:74`.
+* Source currently contains:
+  `catch (NumberFormatException beyondLongRange | DateTimeParseException notACanonicalDay)`.
+  Java multi-catch syntax permits one variable after the complete alternative
+  list; two separately named alternatives are a syntax error.
+* Exit code: `1`. Redacted raw log: `deploy/artifacts/local-backend-verify/mvn-verify-offline.log`.
+
+Requested owner action (T12): correct the multi-catch syntax without weakening
+strict cache-key validation, run the relevant tests and `mvn verify` on JDK 17,
+then provide the commit and test evidence. T13 MUST NOT edit this business file
+or claim backend verification until the owner fix is merged and the command
+exits zero.

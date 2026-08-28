@@ -6,8 +6,8 @@
   - Partial (slice 5): index + exact merge commits (`1753903` main, `652513b` T09 incl. T07/T10, `240a7b2` T08, `974a213` T11, `13c51e0` T12) recorded in `deploy/evidence/preconditions.md` §2–3. NOT in main yet, delta specs unsynced, owner-rebase proof uncollected — gate partial, change stays Draft; unchecked.
 - [x] 1.3 Publish an ownership map for allowed T13 paths (integration/E2E tests, JMeter, `deploy/**`, deployment/performance/runbook/demo docs) and a stop-and-request template for T01–T12 defects or shared-file changes.
   - Evidence (slice 5): ownership map (allowed/forbidden paths) + stop-and-request template published in `deploy/evidence/preconditions.md` §4–5; live requests tracked in `deploy/owner-change-requests.md`.
-- [ ] 1.4 Select and document the approved headless CLI/browser runner available in the apply environment; if unavailable, mark E2E execution blocked rather than substituting unapproved tooling silently.
-  - Partial (slice 4, static only): runner SELECTED and documented = repo-internal `scripts/tests/t08/run.ps1` (`-Action Run`) + Chrome `--headless=new` raw CDP — the only in-repo browser harness (approval rationale in `deploy/e2e/README.md`); recorded in `deploy/e2e/profile.example.json`. The apply-environment AVAILABILITY check (Chrome/node actually present and runnable) has NOT been executed, so the task stays unchecked.
+- [x] 1.4 Select and document the approved headless CLI/browser runner available in the apply environment; if unavailable, mark E2E execution blocked rather than substituting unapproved tooling silently.
+  - Evidence (authorized local run, 2026-08-28): `pwsh scripts/tests/t08/run.ps1 -Action Check` exited `0` with `CHECK_OK`; runner is the existing T08 harness using Chrome `--headless=new`/raw CDP. No browser flow was claimed or executed by this check.
 
 ## 2. Integration and headless E2E evidence
 
@@ -71,13 +71,15 @@
 ## 7. Local verification gates
 
 - [ ] 7.1 Run `cd booking-api && mvn verify` on JDK 17 and preserve the actual output.
-- [ ] 7.2 Run a clean frontend install/build using the repository-pinned lockfile and preserve the actual output; do not modify package manifests in T13.
+  - Executed but failed (authorized local run, 2026-08-28): `mvn -o -B verify` used JDK 17.0.20 and exited `1` at T12-owned `booking-api/src/main/java/com/yu030x/booking/cache/key/AvailabilityCacheKey.java:74`; raw log `deploy/artifacts/local-backend-verify/mvn-verify-offline.log`, blocker OCR-9. Not marked complete.
+- [x] 7.2 Run a clean frontend install/build using the repository-pinned lockfile and preserve the actual output; do not modify package manifests in T13.
+  - Evidence (authorized local offline run, 2026-08-28): `cd booking-web && npm ci --offline --ignore-scripts` exited `0`; `npm run build` exited `0`; logs `deploy/artifacts/local-frontend-offline/npm-ci-offline.log` and `npm-build.log`. Vite emitted non-fatal chunk/comment warnings; no package manifest was modified.
 - [ ] 7.3 Run strict OpenSpec change validation, main-spec validation after any future sync, and `git diff --check`; record unexecuted checks explicitly.
-  - Partial (slice 6, static only): `deploy/evidence/verification-matrix.md` defines the strict validation commands and evidence locations; no OpenSpec validator or diff check has been executed in this slice, so this remains unchecked.
+  - Partial: `openspec validate verify-and-deploy-system --type change --strict` exited `0` and `git diff --check` passed on 2026-08-28; main-spec validation after sync remains not run because delta specs are not yet synced. Task remains unchecked until the full gate is satisfied.
 - [ ] 7.4 Run compose config, image/dependency/artifact scan, secret scan, health smoke, empty migration, backup/restore, restart persistence, Redis failure, and local headless E2E checks; attach raw evidence and classify failures.
-  - Partial (slice 6, static only): the verification matrix maps each check to its reusable entrypoint, preconditions, raw artifact path, and pass criterion; no runtime gate has been executed and all evidence rows remain NOT RUN/BLOCKED as applicable.
+  - Partial (slice 6, static only): the verification matrix maps each check to its reusable entrypoint, preconditions, raw artifact path, and pass criterion; authorized local runs on 2026-08-28 recorded Compose config exit 0 with redacted evidence and T08 runner availability exit 0; no E2E flow ran. Fixed images are absent locally, so image build/Compose up/migration and dependent checks remain blocked without external image pulls. Task remains unchecked.
 - [ ] 7.5 Review changed paths against ownership and verify no `.env`, key, token, password, PII, build output, migration edit, or public DB/Redis port is present.
-  - Partial (slice 6, static only): ownership and secret-safety review procedure is recorded in `deploy/evidence/preconditions.md` and `deploy/evidence/verification-matrix.md`; final changed-path scan and artifact scan remain unexecuted.
+  - Partial (slice 6, static only): ownership and secret-safety review procedure is recorded in `deploy/evidence/preconditions.md` and `deploy/evidence/verification-matrix.md`; changed-path review found only the intended T13 owner-request edit plus four pre-existing staged docs; .env and generated artifacts are ignored. Compose output required secret redaction, so final publication scan remains open; task stays unchecked.
 
 ## 8. External acceptance gate
 
