@@ -101,7 +101,11 @@ $script:ApiClasses = @(
     'violation/NoShowMysqlIntegrationTest',
     'violation/ViolationPortLateCancelMysqlIntegrationTest',
     'user/UserMysqlIntegrationTest',
-    'common/config/SecurityContextIntegrationTest'
+    'common/config/SecurityContextIntegrationTest',
+    'resource/ResourceMysqlIntegrationTest',
+    'availability/AvailabilityMysqlIntegrationTest',
+    'user/UserCreditMysqlIntegrationTest',
+    'common/config/RedisRealIntegrationTest'
 )
 $script:ApiClasses = @($script:ApiClasses | Select-Object -Unique)
 
@@ -116,8 +120,11 @@ $localHosts = @('127.0.0.1', 'localhost', '::1')
 
 function Assert-LocalUrl {
     param([string]$Url, [string]$Label)
-    $u = [uri]$Url
-    if ($u.Scheme -notin @('http', 'https')) {
+    try { $u = [uri]$Url } catch {
+        Write-Warning ("REFUSED: {0} is not a valid absolute URL." -f $Label)
+        exit 2
+    }
+    if (-not $u.IsAbsoluteUri -or $u.Scheme -notin @('http', 'https')) {
         Write-Warning ("REFUSED: {0} scheme '{1}' must be http/https" -f $Label, $u.Scheme); exit 2
     }
     if ($localHosts -notcontains $u.Host) {
@@ -165,10 +172,22 @@ if (-not $Execute) {
 $bookingApiDir = [string]$profile0.bookingApiDir
 $t08Dir = [string]$profile0.t08HarnessDir
 foreach ($p in @($bookingApiDir, $t08Dir)) {
-    if (-not $p -or -not (Test-Path -LiteralPath $p)) {
-        Write-Warning "BLOCKED: profile path placeholder not expanded: '$p'"
+    if (-not $p -or -not (Test-Path -LiteralPath $p -PathType Container)) {
+        Write-Warning "BLOCKED: profile path placeholder not expanded to a directory: '$p'"
         exit 3
     }
+}
+# The profile may select a fixture, but it may not redirect this lane to an
+# arbitrary browser harness or a different source tree.
+$expectedApiDir = (Resolve-Path (Join-Path $repoRoot 'booking-api')).Path
+$expectedT08Dir = (Resolve-Path (Join-Path $repoRoot 'scripts\tests\t08')).Path
+if ((Resolve-Path -LiteralPath $bookingApiDir).Path -ne $expectedApiDir) {
+    Write-Warning 'REFUSED: bookingApiDir must be the repository booking-api directory.'
+    exit 2
+}
+if ((Resolve-Path -LiteralPath $t08Dir).Path -ne $expectedT08Dir) {
+    Write-Warning 'REFUSED: t08HarnessDir must be the repository scripts/tests/t08 directory.'
+    exit 2
 }
 $Artifacts = Join-Path $ArtifactRoot "e2e-$Mode-$RunId"
 New-Item -ItemType Directory -Path $Artifacts -Force | Out-Null

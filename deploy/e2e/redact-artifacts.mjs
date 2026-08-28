@@ -37,8 +37,15 @@ if (!target) {
   console.error('usage: node redact-artifacts.mjs <targetDir>');
   process.exit(3);
 }
-if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
+let targetStat;
+try {
+  targetStat = fs.lstatSync(target);
+} catch {
   console.error('target must be an existing directory: ' + target);
+  process.exit(3);
+}
+if (!targetStat.isDirectory() || targetStat.isSymbolicLink()) {
+  console.error('target must be a real local directory (symlinks are refused): ' + target);
   process.exit(3);
 }
 
@@ -79,11 +86,16 @@ const RESIDUAL_CHECKS = [
   { name: 'pii-fields', re: /"(?:studentNo|student_no|realName|real_name)"\s*:\s*"(?!\*\*\*REDACTED-PII\*\*\*")[^"]*"/i },
 ];
 
+const unsafeLinks = [];
 function* walk(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
+    if (entry.isSymbolicLink()) {
+      unsafeLinks.push(path.relative(target, full));
+      continue;
+    }
     if (entry.isDirectory()) yield* walk(full);
-    else yield full;
+    else if (entry.isFile()) yield full;
   }
 }
 
@@ -127,12 +139,19 @@ for (const file of walk(target)) {
   }
 }
 
+if (unsafeLinks.length > 0) {
+  for (const link of unsafeLinks) {
+    residual.push({ file: link, check: 'UNSAFE-SYMLINK' });
+  }
+}
+
 fs.writeFileSync(
   path.join(target, 'redaction-manifest.json'),
   JSON.stringify({
     generatedBy: 'T13 redact-artifacts.mjs',
     entries: manifest,
     oversizeUnredacted: oversize,
+    unsafeLinks,
     residual,
   }, null, 2),
   'utf8'

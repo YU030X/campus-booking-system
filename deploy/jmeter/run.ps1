@@ -86,8 +86,12 @@ function Assert-LocalBaseUrl {
     # silently dropped when the URL is split into protocol/host/port for the
     # JMX properties - refuse instead of mis-targeting.
     param([string]$Url)
-    $u = [uri]$Url
-    if ($u.Scheme -notin @('http', 'https')) {
+    $u = $null
+    try { $u = [uri]$Url } catch {
+        Write-Warning 'REFUSED: baseUrl is not a valid absolute URI.'
+        exit 2
+    }
+    if (-not $u.IsAbsoluteUri -or $u.Scheme -notin @('http', 'https')) {
         Write-Warning ("REFUSED: baseUrl scheme '{0}' must be http/https" -f $u.Scheme); exit 2
     }
     if ($localHosts -notcontains $u.Host) {
@@ -218,6 +222,10 @@ if ($scenario -eq 'same-slot') {
     $seenIds = New-Object System.Collections.Generic.HashSet[long]
     $minDay = $null; $maxDay = $null
     $lineNo = 0
+    if ($allLines.Count -ne 100 -or $rows.Count -ne 100) {
+        Write-Warning ("REFUSED: distinct CSV must contain exactly 100 data rows with no blank lines (got {0} lines, {1} non-empty)." -f $allLines.Count, $rows.Count)
+        exit 2
+    }
     foreach ($line in $rows) {
         $lineNo++
         $parts = $line.Split(',')
@@ -230,7 +238,19 @@ if ($scenario -eq 'same-slot') {
         if ($rid -notmatch '^\d+$')     { Write-Warning ("REFUSED: distinct CSV line {0} resourceId must be numeric." -f $lineNo); exit 2 }
         if ($st -notmatch $timePattern) { Write-Warning ("REFUSED: distinct CSV line {0} startTime must match {1}." -f $lineNo, $timePattern); exit 2 }
         if ($et -notmatch $timePattern) { Write-Warning ("REFUSED: distinct CSV line {0} endTime must match {1}." -f $lineNo, $timePattern); exit 2 }
-        $idVal = [long]$rid
+        try {
+            $rowStart = [datetime]::ParseExact($st, 'yyyy-MM-dd HH:mm:ss', $null)
+            $rowEnd = [datetime]::ParseExact($et, 'yyyy-MM-dd HH:mm:ss', $null)
+        } catch {
+            Write-Warning ("REFUSED: distinct CSV line {0} contains an invalid timestamp." -f $lineNo); exit 2
+        }
+        $rowMinutes = [long]($rowEnd - $rowStart).TotalMinutes
+        if (($rowMinutes -le 0) -or (($rowMinutes % 30) -ne 0)) {
+            Write-Warning ("REFUSED: distinct CSV line {0} span must be positive and 30-minute aligned." -f $lineNo); exit 2
+        }
+        try { $idVal = [long]$rid } catch {
+            Write-Warning ("REFUSED: distinct CSV line {0} resourceId is outside Int64 range." -f $lineNo); exit 2
+        }
         if (-not $seenIds.Add($idVal))  { Write-Warning ("REFUSED: distinct CSV line {0} repeats resourceId {1}." -f $lineNo, $rid); exit 2 }
         [void]$idList.Add($idVal)
         $d = ($st -split ' ')[0]

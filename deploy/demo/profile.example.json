@@ -1,0 +1,19 @@
+{
+  "$comment": "T13 slice 5 demo profile TEMPLATE. Ephemeral runtime fixture ONLY - this is NOT a migration seed and nothing here is committed into the database lifecycle. Placeholders <...> must be expanded before Execute. Credential VALUES never appear here: only env NAMES. Loopback-only; publicAccessDenied must stay true. Static template; never executed.",
+  "publicAccessDenied": true,
+  "frontendUrl": "http://127.0.0.1:4173",
+  "backendUrl": "http://127.0.0.1:18080",
+  "composeFile": "<path-to-deploy/compose.yml>",
+  "t08SeedPath": "<path-to-scripts/tests/t08/seed.sql>",
+  "t08HarnessDir": "<path-to-scripts/tests/t08>",
+  "e2eRunPath": "<path-to-deploy/e2e/run.ps1>",
+  "fixtureOwner": "T13 ephemeral runtime fixture (created at Execute time; owner request OCR-5 tracks attestation)",
+  "namespacePrefix": "t13demo",
+  "credentials": {
+    "$note": "root credential for the demo compose mysql container arrives via container-side env only (MYSQL_ROOT_PASSWORD inside the container); the names below are NOT read by run.ps1 - demo passwords are generated at runtime and never persisted",
+    "rootPasswordEnv": "MYSQL_ROOT_PASSWORD"
+  },
+  "fixtureAttested": false,
+  "approvalBrowserFixtureAttested": false,
+  "noShowScanWaitSeconds": 90
+}

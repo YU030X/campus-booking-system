@@ -73,6 +73,14 @@ RUNTIME-GENERATED 100-row distinct CSV (`token,resourceId,startTime,endTime`;
 artifact — never committed — and its token column is consumed only by JMeter
 at run time; run.ps1 validates structure without recording values.
 
+**Demo extension (slice 5)**: the T13 ephemeral fixture assets are now DEFINED
+(`deploy/demo/profile.example.json` + `deploy/demo/run.ps1`: run-id-scoped
+users, T13-owned approval resource, deterministic PENDING booking, past
+CONFIRMED seed left to the OWNER no-show scan). They remain UNEXECUTED and
+UNATTESTED: `fixtureAttested` stays false until an owner review of the demo
+lifecycle; until then StudentBrowser/E2E consume the fixture only in blocked
+or planning form.
+
 ## OCR-8 (approval owners): deterministic approval-browser fixture + approved command missing
 
 The ApprovalBrowser lane (`deploy/e2e/run.ps1`) requires (1)
