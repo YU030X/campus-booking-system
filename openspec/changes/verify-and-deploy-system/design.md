@@ -37,25 +37,35 @@ JMeter plans share request data and environment capture while varying only the c
 
 Alternative considered: a single final-load run. Rejected because it cannot demonstrate why the unique index is the correctness boundary or whether Redisson changes conflict behavior.
 
-### 4. Compose keeps stateful services private
+### 4. Standing authorization is local-only and worktree-scoped
+The user has granted standing permission to execute local verification tools in
+`D:\Projects\project1_campus\target\worktrees\verify-and-deploy-system`:
+Docker/Docker Compose, Maven, npm, JMeter, headless Chrome, MySQL/Redis, and
+migration/backup/restore/restart/database checks. This is an execution permission,
+not evidence of success. Every runtime URL remains restricted to
+`127.0.0.1`, `localhost`, or `::1`. External hosts, public IPs, DNS, TLS/certificates,
+public URLs, public deployment, and externally exposed 443 remain outside the
+permission and require separate authorization.
+
+### 5. Compose keeps stateful services private
 
 The runtime has Nginx as the only host-published service. API, MySQL, and Redis communicate on private networks; named volumes hold MySQL/Redis state; healthchecks and dependency conditions gate startup. Image tags are pinned and accompanied by a digest refresh procedure. Resource/log limits and non-root execution are explicit runtime settings.
 
 Alternative considered: publish MySQL/Redis for convenience. Rejected because it violates the project security contract and would make local evidence unsafe to reuse.
 
-### 5. Nginx is the single edge contract
+### 6. Nginx is the single edge contract
 
 Nginx serves the built SPA with history fallback and proxies `/api` to the API service. The configuration owns headers, body limits, upstream timeouts, and certificate/key mounts. Certificate renewal is a runbook operation requiring an authorized target; no key is committed.
 
 Alternative considered: expose API and static server separately. Rejected because it complicates same-origin E2E evidence and increases public attack surface.
 
-### 6. Fresh schema and demo data are separate lanes
+### 7. Fresh schema and demo data are separate lanes
 
 The empty-database gate runs V001–V005 only and asserts twelve tables/no seed. Demo orchestration consumes a separately approved T01 seed change or an ephemeral fixture, with generated strong credentials and no PII. If T01 does not provide that source, T13 opens a change request and marks the demo gate blocked.
 
 Alternative considered: append demo inserts to V005. Rejected because it changes the frozen migration contract and makes fresh-schema verification non-deterministic.
 
-### 7. Recovery is evidence-first and rollback is conservative
+### 8. Recovery is evidence-first and rollback is conservative
 
 The runbook records backup command, restore target, checksums/row evidence, elapsed time, assumed RPO/RTO, volume restart behavior, and image/config rollback. It treats committed migrations as forward-only unless an owner-approved recovery procedure exists; rollback restores a prior image/config or backup rather than deleting schema history.
 

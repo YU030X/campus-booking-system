@@ -31,3 +31,28 @@ Local compose/config/health/restart evidence MAY be completed without infrastruc
 #### Scenario: No infrastructure authorization
 - **WHEN** no user-authorized target or TLS credentials are available
 - **THEN** local gates are reportable, external gates are marked not run/blocked, and no public URL or certificate is represented as complete.
+
+### Requirement: Standing local verification authorization
+For this T13 change, the user-authorized verification boundary MUST be the dedicated
+worktree `D:\Projects\project1_campus\target\worktrees\verify-and-deploy-system`.
+Within that worktree, local Docker/Docker Compose, Maven, npm, JMeter, headless
+Chrome, MySQL/Redis, migration, backup/restore, restart, and database verification
+commands MAY be executed without asking for the same authorization again. Runtime
+network targets MUST be limited to `127.0.0.1`, `localhost`, or `::1`.
+This standing authorization MUST NOT be interpreted as authorization to access an
+external host, public IP, DNS, TLS or certificate service, public URL, public
+deployment, or externally exposed port 443. Any operation outside this boundary
+MUST remain blocked until separately authorized.
+
+#### Scenario: Authorized local verification only
+- **WHEN** a verification command runs from the dedicated worktree and targets only
+  loopback services
+- **THEN** the command may proceed under this standing authorization, while its
+  actual exit code and redacted evidence still determine whether the gate passes;
+  authorization alone MUST NOT be recorded as test or deployment success.
+
+#### Scenario: Boundary-exceeding operation
+- **WHEN** a command would contact an external host, public IP, DNS/TLS service,
+  public URL, or public deployment endpoint
+- **THEN** the command MUST NOT be executed under this standing authorization and
+  the related gate MUST be recorded as blocked or not run.
