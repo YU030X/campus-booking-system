@@ -40,7 +40,7 @@ public final class OperationLogRedactor {
     private static final Pattern URI_USERINFO_SECRET = Pattern.compile(
             "(?i)((?:jdbc:[a-z0-9]+|rediss?|postgres(?:ql)?|mysql)://[^:/?#\\s@]+:)([^@/?#\\s]{1,256})(@)");
     private static final Pattern JWT_VALUE =
-            Pattern.compile("eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{4,}\\.[A-Za-z0-9_-]{4,}");
+            Pattern.compile("eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+");
     private static final Pattern BEARER_PREFIX = Pattern.compile("(?i)^\\s*bearer\\s+\\S+");
     private static final Pattern FULL_PHONE = Pattern.compile("(?<![0-9])1[3-9][0-9]{9}(?![0-9])");
 

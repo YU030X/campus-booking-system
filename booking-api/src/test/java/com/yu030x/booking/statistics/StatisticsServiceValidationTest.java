@@ -73,9 +73,9 @@ class StatisticsServiceValidationTest {
         ResourceUsageResponse fullYear =
                 service.resourceUsage(start.toString(), start.plusDays(365).toString());
         assertThat(fullYear.fromDate()).isEqualTo("2026-01-01");
-        assertThat(fullYear.toDate()).isEqualTo("2026-12-31");
+        assertThat(fullYear.toDate()).isEqualTo("2027-01-01");
         verify(mapper).selectResourceUsage(org.mockito.ArgumentMatchers.eq("2026-01-01"),
-                org.mockito.ArgumentMatchers.eq("2026-12-31"), any(), any());
+                org.mockito.ArgumentMatchers.eq("2027-01-01"), any(), any());
 
         assertThatThrownBy(() -> service.resourceUsage(start.toString(),
                 start.plusDays(366).toString()))

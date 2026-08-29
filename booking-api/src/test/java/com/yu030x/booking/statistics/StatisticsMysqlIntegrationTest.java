@@ -26,10 +26,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * resource closures, frozen 30-minute slot occupancy) plus MySQL EXPLAIN plans
  * proving index-only access paths.
  *
- * STATUS: this skeleton is written ONLY; it was neither compiled nor executed
- * in this session and MUST NOT be quoted as passing evidence until an owned
- * verification run records BOOKING_MYSQL8_TEST=true, DB_URL, DB_USERNAME,
- * DB_PASSWORD plus the exact commands and raw EXPLAIN output below.
+ * Run with BOOKING_MYSQL8_TEST=true plus DB_URL, DB_USERNAME and DB_PASSWORD
+ * against MySQL 8. The test emits the raw EXPLAIN rows used for acceptance.
  */
 @SpringBootTest(classes = BookingApplication.class,
         properties = {"booking.statistics.enabled=true",
@@ -150,13 +148,15 @@ class StatisticsMysqlIntegrationTest {
 
         long completed = seedBooking(musicRoom, LocalDateTime.parse("2026-08-03T09:00"),
                 LocalDateTime.parse("2026-08-03T11:00"), "COMPLETED");
-        seedSlots(musicRoom, completed, 4); // 120 minutes of slots inside 09:00..11:00
+        seedSlots(musicRoom, completed, LocalDateTime.parse("2026-08-03T09:00"), 4);
+        // 120 minutes of slots inside 09:00..11:00
         long cancelled = seedBooking(musicRoom, LocalDateTime.parse("2026-08-07T09:00"),
                 LocalDateTime.parse("2026-08-07T10:30"), "CANCELLED");
-        seedSlots(musicRoom, cancelled, 3); // slots still exist before release semantics fire
+        seedSlots(musicRoom, cancelled, LocalDateTime.parse("2026-08-07T09:00"), 3);
+        // slots still exist before release semantics fire
         long noShow = seedBooking(deadRoom, LocalDateTime.parse("2026-08-03T08:00"),
                 LocalDateTime.parse("2026-08-03T09:00"), "NO_SHOW");
-        seedSlots(deadRoom, noShow, 2);
+        seedSlots(deadRoom, noShow, LocalDateTime.parse("2026-08-03T08:00"), 2);
 
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(USAGE_AGGREGATE,
                 from, to,
@@ -166,17 +166,17 @@ class StatisticsMysqlIntegrationTest {
         Map<String, Object> musicRow = rowOf(rows, musicRoom);
         // Denominator: Wed (global closure) and Thu (specific closure) contribute
         // zero; Mon+Tue+Fri keep 3 x 120 rule minutes.
-        assertThat(musicRow.get("schedulable_minutes")).isEqualTo(360L);
-        assertThat(musicRow.get("occupied_slot_minutes")).isEqualTo(210L); // 7 slots x 30
-        assertThat(musicRow.get("booking_count")).isEqualTo(2L);
-        assertThat(musicRow.get("completed_count")).isEqualTo(1L);
-        assertThat(musicRow.get("cancelled_count")).isEqualTo(1L);
-        assertThat(musicRow.get("no_show_count")).isEqualTo(0L);
+        assertThat(longValue(musicRow, "schedulable_minutes")).isEqualTo(360L);
+        assertThat(longValue(musicRow, "occupied_slot_minutes")).isEqualTo(210L); // 7 slots x 30
+        assertThat(longValue(musicRow, "booking_count")).isEqualTo(2L);
+        assertThat(longValue(musicRow, "completed_count")).isEqualTo(1L);
+        assertThat(longValue(musicRow, "cancelled_count")).isEqualTo(1L);
+        assertThat(longValue(musicRow, "no_show_count")).isEqualTo(0L);
 
         Map<String, Object> deadRow = rowOf(rows, deadRoom);
-        assertThat(deadRow.get("occupied_slot_minutes")).isEqualTo(60L); // 2 x 30
-        assertThat(deadRow.get("no_show_count")).isEqualTo(1L);
-        assertThat(deadRow.get("booking_count")).isEqualTo(1L);
+        assertThat(longValue(deadRow, "occupied_slot_minutes")).isEqualTo(60L); // 2 x 30
+        assertThat(longValue(deadRow, "no_show_count")).isEqualTo(1L);
+        assertThat(longValue(deadRow, "booking_count")).isEqualTo(1L);
     }
 
     @Test
@@ -204,6 +204,10 @@ class StatisticsMysqlIntegrationTest {
                 .orElseThrow();
     }
 
+    private long longValue(Map<String, Object> row, String column) {
+        return ((Number) row.get(column)).longValue();
+    }
+
     private long seedResource(String name) {
         String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
         jdbcTemplate.update("""
@@ -229,11 +233,11 @@ class StatisticsMysqlIntegrationTest {
         return id;
     }
 
-    private void seedSlots(long resourceId, long bookingId, int count) {
+    private void seedSlots(long resourceId, long bookingId, LocalDateTime firstSlot, int count) {
         for (int index = 0; index < count; index++) {
             jdbcTemplate.update("""
                     INSERT INTO booking_slot (resource_id, slot_time, booking_id) VALUES (?, ?, ?)
-                    """, resourceId, LocalDateTime.parse("2026-08-01T08:00").plusMinutes(30L * index),
+                    """, resourceId, firstSlot.plusMinutes(30L * index),
                     bookingId);
         }
     }

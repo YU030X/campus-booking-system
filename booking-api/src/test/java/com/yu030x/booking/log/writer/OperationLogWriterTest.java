@@ -40,9 +40,12 @@ class OperationLogWriterTest {
             committed.add(entity);
             return 1;
         };
-        org.springframework.transaction.support.TransactionOperations requiresNew = callback -> {
-            callback.doInTransaction(null);
-            return null;
+        org.springframework.transaction.support.TransactionOperations requiresNew =
+                new org.springframework.transaction.support.TransactionOperations() {
+            @Override
+            public <T> T execute(org.springframework.transaction.support.TransactionCallback<T> callback) {
+                return callback.doInTransaction(null);
+            }
         };
         OperationLogWriter writer = new OperationLogWriter(mapper, requiresNew, new OperationLogRedactor());
         writer.write(sample());

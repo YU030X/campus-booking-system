@@ -60,7 +60,7 @@ class OperationLogRedactorTest {
         assertEquals(OperationLogRedactor.MAX_PARAMS_TOTAL, total.length(),
                 () -> "over-cap projection must be cut to exactly the cap, was " + total.length());
         assertTrue(total.startsWith("{\"arg0\":"));
-        assertTrue(total.endsWith(OperationLogRedactor.TRUNCATED_SUFFIX));
+        assertTrue(total.endsWith("\"[truncated]"));
     }
 
     @Test

@@ -3,11 +3,10 @@ package com.yu030x.booking.log.wiring;
 import com.yu030x.booking.log.annotation.OperationLog;
 import com.yu030x.booking.log.interceptor.OperationLogInterceptor;
 import java.lang.reflect.Method;
-import java.util.Arrays;
 import org.springframework.aop.Advisor;
 import org.springframework.aop.framework.Advised;
-import org.springframework.aop.framework.AopUtils;
 import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.util.ReflectionUtils;
 
@@ -20,8 +19,6 @@ import org.springframework.util.ReflectionUtils;
  */
 public class OperationLogWiringPostProcessor implements BeanPostProcessor {
 
-    private static final String OWN_PACKAGE = "com.yu030x.booking.log.";
-
     private final OperationLogInterceptor interceptor;
 
     public OperationLogWiringPostProcessor(OperationLogInterceptor interceptor) {
@@ -30,7 +27,7 @@ public class OperationLogWiringPostProcessor implements BeanPostProcessor {
 
     @Override
     public Object postProcessAfterInitialization(Object bean, String beanName) {
-        if (bean == null || bean.getClass().getName().startsWith(OWN_PACKAGE)) {
+        if (bean == null) {
             return bean;
         }
         Class<?> targetClass = AopUtils.getTargetClass(bean);

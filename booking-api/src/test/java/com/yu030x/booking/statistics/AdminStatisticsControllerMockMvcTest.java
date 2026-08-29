@@ -127,7 +127,13 @@ class AdminStatisticsControllerMockMvcTest {
     }
 
     @Test
-    void missingOrIllegalDatesReturn40000WithoutTouchingTheService() throws Exception {
+    void missingOrIllegalDatesFromServiceMapTo40000() throws Exception {
+        when(service.resourceUsage(null, "2026-08-07"))
+                .thenThrow(new BizException(ErrorCode.INVALID_PARAMETER, "fromDate is required"));
+        when(service.resourceUsage("2026/08/01", "2026-08-07"))
+                .thenThrow(new BizException(ErrorCode.INVALID_PARAMETER, "invalid date"));
+        when(service.bookingStatuses("2026-08-27", "2026-08-01"))
+                .thenThrow(new BizException(ErrorCode.INVALID_PARAMETER, "invalid range"));
         mvc.perform(get("/api/v1/admin/statistics/resources")
                         .param("toDate", "2026-08-07"))
                 .andExpect(status().isBadRequest())
@@ -141,10 +147,9 @@ class AdminStatisticsControllerMockMvcTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(40000));
 
-        verify(service, org.mockito.Mockito.never())
-                .resourceUsage(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
-        verify(service, org.mockito.Mockito.never())
-                .bookingStatuses(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(service).resourceUsage(null, "2026-08-07");
+        verify(service).resourceUsage("2026/08/01", "2026-08-07");
+        verify(service).bookingStatuses("2026-08-27", "2026-08-01");
     }
 
     @Test

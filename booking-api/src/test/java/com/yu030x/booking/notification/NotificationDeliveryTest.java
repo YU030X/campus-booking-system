@@ -33,10 +33,12 @@ class NotificationDeliveryTest {
     @BeforeEach
     void setUp() {
         mapper = mock(NotificationMapper.class);
-        TransactionOperations requiresNew = callback -> {
-            transactionCount.incrementAndGet();
-            callback.doInTransaction(null);
-            return null;
+        TransactionOperations requiresNew = new TransactionOperations() {
+            @Override
+            public <T> T execute(org.springframework.transaction.support.TransactionCallback<T> callback) {
+                transactionCount.incrementAndGet();
+                return callback.doInTransaction(null);
+            }
         };
         delivery = new NotificationDelivery(mapper, requiresNew);
     }
@@ -46,6 +48,7 @@ class NotificationDeliveryTest {
     }
 
     private void assertInvalidParameterZeroWrite(NotificationRequestedEvent payload) {
+        org.mockito.Mockito.clearInvocations(mapper);
         assertThatThrownBy(() -> delivery.deliver(payload))
                 .isInstanceOfSatisfying(BizException.class,
                         e -> assertThat(e.errorCode).isEqualTo(ErrorCode.INVALID_PARAMETER));
@@ -277,7 +280,13 @@ class NotificationDeliveryTest {
         return new NotificationDelivery(mapper, null) {
             @Override
             public void deliver(NotificationRequestedEvent event) {
-                throw thrown;
+                if (thrown instanceof RuntimeException runtimeException) {
+                    throw runtimeException;
+                }
+                if (thrown instanceof Error error) {
+                    throw error;
+                }
+                throw new AssertionError("test requires an unchecked failure", thrown);
             }
         };
     }
