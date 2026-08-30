@@ -34,6 +34,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @SpringBootTest(classes = BookingApplication.class, properties = {
         "booking.identity.enabled=true",
+        "booking.notifications.enabled=true",
         "booking.security.jwt-secret=0123456789abcdef0123456789abcdef",
         "springdoc.api-docs.enabled=false",
         "springdoc.swagger-ui.enabled=false"
@@ -115,6 +116,8 @@ class ApprovalMysqlIntegrationTest {
 
     @AfterEach
     void removeFixture() {
+        jdbc.update("DELETE FROM notification WHERE user_id IN "
+                + "(SELECT id FROM `user` WHERE username LIKE ?)", fixtureName + "%");
         for (long bookingId : bookingIds) {
             jdbc.update("DELETE FROM approval_record WHERE booking_id=?", bookingId);
             jdbc.update("DELETE FROM violation_record WHERE booking_id=?", bookingId);
@@ -156,6 +159,12 @@ class ApprovalMysqlIntegrationTest {
                 Long.class, bookingId, action);
     }
 
+    private long notificationCount(long bookingId, String type) {
+        return jdbc.queryForObject(
+                "SELECT COUNT(*) FROM notification WHERE biz_id=? AND type=?",
+                Long.class, bookingId, type);
+    }
+
     @Test
     void approveWinsKeepsSlotsInsertsOneImmutableRecordAndRepeatsAreNoOps() {
         long bookingId = insertBooking("PENDING_APPROVAL",
@@ -166,11 +175,13 @@ class ApprovalMysqlIntegrationTest {
         assertThat(first.status()).isEqualTo(BookingStatus.CONFIRMED);
         assertThat(slotCount(bookingId)).isEqualTo(1);
         assertThat(approveRecordCount(bookingId, "APPROVE")).isEqualTo(1);
+        assertThat(notificationCount(bookingId, "BOOKING_APPROVED")).isEqualTo(1);
 
         BookingView second = approvalService.approve(bookingId, adminId, "again");
         assertThat(second.status()).isEqualTo(BookingStatus.CONFIRMED);
         assertThat(approveRecordCount(bookingId, "APPROVE")).isEqualTo(1);
         assertThat(slotCount(bookingId)).isEqualTo(1);
+        assertThat(notificationCount(bookingId, "BOOKING_APPROVED")).isEqualTo(1);
 
         org.junit.jupiter.api.Assertions.assertThrows(BizException.class,
                 () -> approvalService.reject(bookingId, adminId, "opposite action"));
@@ -193,11 +204,13 @@ class ApprovalMysqlIntegrationTest {
         assertThat(jdbc.queryForObject(
                 "SELECT COUNT(*) FROM approval_record WHERE booking_id=?", Long.class, bookingId))
                 .isEqualTo(0);
+        assertThat(notificationCount(bookingId, "BOOKING_REJECTED")).isZero();
 
         BookingView rejected = approvalService.reject(bookingId, adminId, "材料不全");
         assertThat(rejected.status()).isEqualTo(BookingStatus.REJECTED);
         assertThat(slotCount(bookingId)).isEqualTo(0);
         assertThat(approveRecordCount(bookingId, "REJECT")).isEqualTo(1);
+        assertThat(notificationCount(bookingId, "BOOKING_REJECTED")).isEqualTo(1);
     }
 
     @Test
@@ -211,6 +224,7 @@ class ApprovalMysqlIntegrationTest {
         assertThat(jdbc.queryForObject(
                 "SELECT COUNT(*) FROM violation_record WHERE booking_id=?", Long.class, early))
                 .isEqualTo(0);
+        assertThat(notificationCount(early, "VIOLATION")).isZero();
 
         LocalDateTime nearStart = LocalDateTime.now(SHANGHAI).plusMinutes(90);
         long late = insertBooking("CONFIRMED", nearStart);
@@ -230,6 +244,7 @@ class ApprovalMysqlIntegrationTest {
         Integer credit = jdbc.queryForObject(
                 "SELECT credit_score FROM `user` WHERE id=?", Integer.class, poorUserId);
         assertThat(credit).isEqualTo(0);
+        assertThat(notificationCount(late, "VIOLATION")).isEqualTo(1);
     }
 
     @Test
@@ -246,6 +261,7 @@ class ApprovalMysqlIntegrationTest {
                 "SELECT COUNT(*) FROM violation_record WHERE booking_id=? "
                         + "AND violation_type='LATE_CANCEL'", Long.class, bookingId))
                 .isEqualTo(1);
+        assertThat(notificationCount(bookingId, "VIOLATION")).isEqualTo(1);
     }
 
     @Test
@@ -280,6 +296,7 @@ class ApprovalMysqlIntegrationTest {
             assertThat(approveRecordCount(bookingId, "REJECT")).isEqualTo(1);
             assertThat(approveRecordCount(bookingId, "APPROVE")).isEqualTo(0);
             assertThat(slotCount(bookingId)).isEqualTo(0);
+            assertThat(notificationCount(bookingId, "BOOKING_REJECTED")).isEqualTo(1);
         } finally {
             pool.shutdownNow();
         }
@@ -321,6 +338,7 @@ class ApprovalMysqlIntegrationTest {
             Integer credit = jdbc.queryForObject(
                     "SELECT credit_score FROM `user` WHERE id=?", Integer.class, ownerId);
             assertThat(credit).isEqualTo(95);
+            assertThat(notificationCount(bookingId, "VIOLATION")).isEqualTo(1);
         } finally {
             pool.shutdownNow();
         }
@@ -364,6 +382,7 @@ class ApprovalMysqlIntegrationTest {
             assertThat(approveRecordCount(bookingId, "APPROVE")).isEqualTo(1);
             assertThat(jdbc.queryForObject("SELECT status FROM booking WHERE id=?",
                     String.class, bookingId)).isEqualTo("CONFIRMED");
+            assertThat(notificationCount(bookingId, "BOOKING_APPROVED")).isEqualTo(1);
         } finally {
             pool.shutdownNow();
         }
