@@ -3,7 +3,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('Check', 'List', 'OperationLog', 'Cache', 'Notifications', 'Statistics', 'Unit')]
+    [ValidateSet('Check', 'List', 'OperationLog', 'Cache', 'RealCache', 'Notifications', 'Statistics', 'Unit')]
     [string]$Mode = 'Check'
 )
 
@@ -56,11 +56,18 @@ function Assert-NoSharedDrift {
 }
 
 function Invoke-SliceTests {
-    param([string]$Selector)
+    param(
+        [string]$Selector,
+        [string]$ExcludedGroups = ''
+    )
     Write-Info "Running narrow unit slice via Surefire selection '$Selector' (single module, no verify/DB unless slice demands it):"
     Push-Location $apiDir
     try {
-        & mvn test "-Dtest=$Selector"
+        $arguments = @('test', "-Dtest=$Selector")
+        if (-not [string]::IsNullOrWhiteSpace($ExcludedGroups)) {
+            $arguments += "-DexcludedGroups=$ExcludedGroups"
+        }
+        & mvn @arguments
         if ($LASTEXITCODE -ne 0) { throw "mvn test exited with $LASTEXITCODE" }
     } finally {
         Pop-Location
@@ -88,11 +95,12 @@ switch ($Mode) {
         }
     }
     'OperationLog' { Invoke-SliceTests $slices[0].Selector }
-    'Cache'        { Invoke-SliceTests $slices[1].Selector }
+    'Cache'        { Invoke-SliceTests $slices[1].Selector 'real-redis' }
+    'RealCache'    { Invoke-SliceTests 'com.yu030x.booking.cache.redis.RedissonAvailabilityCacheRealIntegrationTest' }
     'Notifications'{ Invoke-SliceTests $slices[2].Selector }
     'Statistics'   { Invoke-SliceTests $slices[3].Selector }
     'Unit' {
         $combined = ($slices | ForEach-Object { $_.Selector }) -join ','
-        Invoke-SliceTests $combined
+        Invoke-SliceTests $combined 'real-redis'
     }
 }

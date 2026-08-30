@@ -29,8 +29,9 @@
 - [ ] 2.3 Implement after-commit invalidation hooks consumed through owner ports/events for booking create/cancel/reject/no-show and resource status/rule/closure mutations; prove rollback causes no invalidation.
   - UNCHECKED / PARTIAL — done: request port + `cache/invalidate/AfterCommitInvalidationCoordinator.java` (afterCommit-only deletion, rollback zero-delete, never-throws containment). The coordinator unit proof passed in the cache slice. Missing: no booking/resource owner hooks attached (forbidden to attach from this slice).
 - [ ] 2.4 Add real Redis integration tests for hit, miss, deterministic TTL algorithm and inclusive 300..900-second bounds, outage/write failure availability-database fallback (with T07 lock fail-closed behavior unaffected), invalidation after commit for booking create/cancel/reject/no-show and resource status/rule/closure changes, no invalidation after rollback, and optional single-flight failure safety. Do not claim an embedded/mock Redis test as real Redis evidence.
+  - UNCHECKED / PARTIAL — `RedissonAvailabilityCacheRealIntegrationTest` now runs against the private Docker Redis 7 endpoint and passed 1/1 with no skip: exact-key MISS→write→HIT, actual deterministic TTL near the 300..900-second oracle, real deletion, after-commit deletion, rollback preservation, and read/write/invalidate containment after the real Redisson client shuts down. `scripts/tests/t12/run.ps1 -Mode RealCache` is the explicit reusable entry; ordinary Cache/Unit modes exclude the `real-redis` tag. Missing: the availability DB-fallback owner call site and the booking/resource owner hooks/end-to-end mutation cases required by this task.
 - [ ] 2.5 Verify cache tests, relevant backend build, and `git diff --check`; capture before/after latency or hit/miss evidence without claiming unrun measurements.
-  - UNCHECKED / PARTIAL — `scripts/tests/t12/run.ps1 -Mode Cache` passed 29/29, the full real-environment backend verify passed, and `git diff --check` passed. Real Redis hit/miss, TTL and outage/fallback measurements required by 2.4 remain absent, so no latency or real-cache claim is made.
+  - UNCHECKED / PARTIAL — `scripts/tests/t12/run.ps1 -Mode Cache` passed 29/29 and `-Mode RealCache` passed 1/1 against real Redis; the earlier full real-environment backend verify passed and `git diff --check` passed. Real adapter hit/miss/TTL/outage containment is now measured, but availability DB-fallback and owner-hook end-to-end evidence required by 2.4 remains absent; no before/after latency claim is made.
 
 ## 3. Optional in-app notifications
 
@@ -61,7 +62,7 @@
 ## 5. Final acceptance and handoff
 
 - [ ] 5.1 Run the relevant backend suite and `mvn verify`; run frontend build only when T12 UI exists; preserve separate evidence for real Redis and MySQL 8/EXPLAIN checks.
-  - UNCHECKED / PARTIAL — all T12 narrow modes and real MySQL/Redis `mvn verify` passed; real MySQL 8/EXPLAIN evidence is recorded under 4.3/4.4. A dedicated real Redis cache suite is still missing under 2.4, so final acceptance remains open.
+  - UNCHECKED / PARTIAL — all prior T12 narrow modes and real MySQL/Redis `mvn verify` passed; real MySQL 8/EXPLAIN evidence is recorded under 4.3/4.4, and the new dedicated real Redis cache adapter suite passed 1/1. Final acceptance remains open for availability/owner wiring, independent feature-cut proof, and any accepted P1 frontend handoffs.
 - [x] 5.2 Run `openspec validate add-supporting-capabilities --type change --strict --no-interactive` and `git diff --check`; fix artifact issues without editing implementation files.
   - CHECKED — strict OpenSpec validation reported `Change 'add-supporting-capabilities' is valid`; `git diff --check` completed without errors.
 - [ ] 5.3 Verify each feature can independently remain disabled/default-false and that cutting statistics, then notifications, then cache leaves P0 booking correctness and T07 tests unchanged.
