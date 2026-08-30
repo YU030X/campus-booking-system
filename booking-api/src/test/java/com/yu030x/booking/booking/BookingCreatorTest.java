@@ -18,6 +18,8 @@ import com.yu030x.booking.booking.mapper.BookingOccupancyMapper;
 import com.yu030x.booking.booking.service.BookingCreationGuard;
 import com.yu030x.booking.booking.service.BookingCreator;
 import com.yu030x.booking.booking.service.BookingMessages;
+import com.yu030x.booking.cache.invalidate.AfterCommitInvalidationCoordinator;
+import com.yu030x.booking.cache.invalidate.AvailabilityInvalidationRequest;
 import com.yu030x.booking.common.api.BookingStatus;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
@@ -38,6 +40,7 @@ class BookingCreatorTest {
     private BookingMapper bookingMapper;
     private BookingOccupancyMapper slotMapper;
     private BookingCreationGuard guard;
+    private AfterCommitInvalidationCoordinator invalidation;
     private BookingCreator creator;
     private ResourceEntity resource;
     private CreateBookingRequest request;
@@ -47,8 +50,9 @@ class BookingCreatorTest {
         bookingMapper = mock(BookingMapper.class);
         slotMapper = mock(BookingOccupancyMapper.class);
         guard = mock(BookingCreationGuard.class);
+        invalidation = mock(AfterCommitInvalidationCoordinator.class);
         Clock clock = Clock.fixed(NOW.atZone(ZONE).toInstant(), ZONE);
-        creator = new BookingCreator(bookingMapper, slotMapper, guard, clock);
+        creator = new BookingCreator(bookingMapper, slotMapper, guard, clock, invalidation);
 
         resource = new ResourceEntity();
         resource.setId(7L);
@@ -75,6 +79,8 @@ class BookingCreatorTest {
         assertEquals("5", view.userId());
         verify(slotMapper).batchInsert(7L, 99L,
                 List.of(NOW.toLocalDate().atTime(14, 0), NOW.toLocalDate().atTime(14, 30)));
+        verify(invalidation).scheduleAfterCommit(new AvailabilityInvalidationRequest(
+                "resource:available-slots:7:2026-08-26", "booking_create"));
     }
 
     @Test
@@ -102,6 +108,7 @@ class BookingCreatorTest {
 
         assertEquals(ErrorCode.BOOKING_ERROR, exception.errorCode);
         assertEquals(BookingMessages.SLOT_CONFLICT, exception.getMessage());
+        verifyNoInvalidation();
     }
 
     @Test
@@ -113,6 +120,7 @@ class BookingCreatorTest {
 
         assertEquals(BookingMessages.SLOT_CONFLICT, exception.getMessage());
         verify(slotMapper, never()).batchInsert(anyLong(), anyLong(), anyList());
+        verifyNoInvalidation();
     }
 
     @Test
@@ -124,5 +132,9 @@ class BookingCreatorTest {
         when(slotMapper.batchInsert(anyLong(), anyLong(), anyList())).thenReturn(2);
         creator.create(5L, request);
         verify(guard).checkAll(7L, 5L, 2, request.startTime(), request.endTime());
+    }
+
+    private void verifyNoInvalidation() {
+        verify(invalidation, never()).scheduleAfterCommit(any());
     }
 }
