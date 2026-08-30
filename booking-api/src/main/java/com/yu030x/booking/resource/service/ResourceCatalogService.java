@@ -1,6 +1,9 @@
 package com.yu030x.booking.resource.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.yu030x.booking.cache.invalidate.AfterCommitInvalidationCoordinator;
+import com.yu030x.booking.cache.invalidate.AvailabilityInvalidationRequest;
+import com.yu030x.booking.cache.key.AvailabilityCacheKey;
 import com.yu030x.booking.common.api.PageResult;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
@@ -18,32 +21,64 @@ import com.yu030x.booking.resource.mapper.ResourceTimeRuleMapper;
 import com.yu030x.booking.resource.vo.ClosureVO;
 import com.yu030x.booking.resource.vo.ResourceVO;
 import com.yu030x.booking.resource.vo.TimeRuleVO;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import org.springframework.dao.DuplicateKeyException;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class ResourceCatalogService {
+    private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
+
     private final ResourceMapper resourceMapper;
     private final ResourceCategoryMapper categoryMapper;
     private final ResourceTimeRuleMapper timeRuleMapper;
     private final ResourceClosureMapper closureMapper;
+    private final AfterCommitInvalidationCoordinator invalidation;
+    private final Clock clock;
 
+    @Autowired
     public ResourceCatalogService(
             @Lazy ResourceMapper resourceMapper,
             @Lazy ResourceCategoryMapper categoryMapper,
             @Lazy ResourceTimeRuleMapper timeRuleMapper,
-            @Lazy ResourceClosureMapper closureMapper) {
+            @Lazy ResourceClosureMapper closureMapper,
+            ObjectProvider<AfterCommitInvalidationCoordinator> invalidationProvider) {
+        this(resourceMapper, categoryMapper, timeRuleMapper, closureMapper,
+                invalidationProvider.getIfAvailable(), Clock.system(SHANGHAI));
+    }
+
+    public ResourceCatalogService(
+            ResourceMapper resourceMapper,
+            ResourceCategoryMapper categoryMapper,
+            ResourceTimeRuleMapper timeRuleMapper,
+            ResourceClosureMapper closureMapper) {
+        this(resourceMapper, categoryMapper, timeRuleMapper, closureMapper,
+                null, Clock.system(SHANGHAI));
+    }
+
+    public ResourceCatalogService(
+            ResourceMapper resourceMapper,
+            ResourceCategoryMapper categoryMapper,
+            ResourceTimeRuleMapper timeRuleMapper,
+            ResourceClosureMapper closureMapper,
+            AfterCommitInvalidationCoordinator invalidation,
+            Clock clock) {
         this.resourceMapper = resourceMapper;
         this.categoryMapper = categoryMapper;
         this.timeRuleMapper = timeRuleMapper;
         this.closureMapper = closureMapper;
+        this.invalidation = invalidation;
+        this.clock = clock;
     }
 
     public PageResult<ResourceVO> list(
@@ -94,7 +129,8 @@ public class ResourceCatalogService {
     @OperationLog("resource_update")
     public ResourceVO update(String rawId, ResourceRequest request) {
         long id = ResourceInputSupport.decimalId(rawId, true);
-        if (id == 0 || resourceMapper.selectActiveForUpdate(id) == null) {
+        ResourceEntity previous = id == 0 ? null : resourceMapper.selectActiveForUpdate(id);
+        if (previous == null) {
             throw resourceNotFound();
         }
         ResourceEntity replacement = normalize(request);
@@ -103,6 +139,7 @@ public class ResourceCatalogService {
         if (resourceMapper.updateActive(replacement) != 1) {
             throw resourceNotFound();
         }
+        scheduleWindow(id, maxAdvance(previous), maxAdvance(replacement), "resource_update");
         return toVO(resourceMapper.selectActiveById(id));
     }
 
@@ -114,12 +151,14 @@ public class ResourceCatalogService {
             throw ResourceInputSupport.invalid();
         }
         int status = ResourceInputSupport.queryInteger(rawStatus, -1, 0, 2);
-        if (id == 0 || resourceMapper.selectActiveForUpdate(id) == null) {
+        ResourceEntity resource = id == 0 ? null : resourceMapper.selectActiveForUpdate(id);
+        if (resource == null) {
             throw resourceNotFound();
         }
         if (resourceMapper.updateActiveStatus(id, status) != 1) {
             throw resourceNotFound();
         }
+        scheduleWindow(id, maxAdvance(resource), maxAdvance(resource), "resource_status");
         return toVO(resourceMapper.selectActiveById(id));
     }
 
@@ -128,7 +167,8 @@ public class ResourceCatalogService {
     public List<TimeRuleVO> replaceTimeRules(String rawId, List<TimeRuleRequest> requests) {
         long resourceId = ResourceInputSupport.decimalId(rawId, true);
         List<NormalizedRule> normalized = normalizeRules(requests);
-        if (resourceId == 0 || resourceMapper.selectActiveForUpdate(resourceId) == null) {
+        ResourceEntity resource = resourceId == 0 ? null : resourceMapper.selectActiveForUpdate(resourceId);
+        if (resource == null) {
             throw resourceNotFound();
         }
 
@@ -141,6 +181,7 @@ public class ResourceCatalogService {
             entity.setEndTime(rule.endTime());
             timeRuleMapper.insert(entity);
         }
+        scheduleWindow(resourceId, maxAdvance(resource), maxAdvance(resource), "resource_time_rule");
         return timeRuleMapper.selectActiveByResourceId(resourceId).stream().map(this::toVO).toList();
     }
 
@@ -169,6 +210,7 @@ public class ResourceCatalogService {
         } catch (DuplicateKeyException exception) {
             throw closureConflict();
         }
+        scheduleClosure(resourceId, closureDate, "resource_closure_create");
         return toVO(closureMapper.selectByIdAndScope(entity.getId(), resourceId));
     }
 
@@ -177,12 +219,14 @@ public class ResourceCatalogService {
     public void deleteClosure(String rawResourceId, String rawClosureId) {
         long resourceId = ResourceInputSupport.decimalId(rawResourceId, true);
         long closureId = ResourceInputSupport.decimalId(rawClosureId, false);
-        if (closureMapper.selectByIdAndScope(closureId, resourceId) == null) {
+        ResourceClosureEntity closure = closureMapper.selectByIdAndScope(closureId, resourceId);
+        if (closure == null) {
             throw closureNotFound();
         }
         if (closureMapper.physicalDeleteByIdAndScope(closureId, resourceId) != 1) {
             throw closureNotFound();
         }
+        scheduleClosure(resourceId, closure.getClosureDate(), "resource_closure_delete");
     }
 
     private ResourceEntity normalize(ResourceRequest request) {
@@ -286,6 +330,46 @@ public class ResourceCatalogService {
 
     private BizException closureConflict() {
         return new BizException(ErrorCode.RESOURCE_ERROR, "closure already exists");
+    }
+
+    private int maxAdvance(ResourceEntity resource) {
+        return resource == null || resource.getMaxAdvanceDays() == null
+                ? 0
+                : Math.max(0, resource.getMaxAdvanceDays());
+    }
+
+    private void scheduleWindow(long resourceId, int previousDays, int currentDays, String origin) {
+        if (invalidation == null) {
+            return;
+        }
+        LocalDate today = LocalDate.now(clock);
+        int inclusiveDays = Math.max(previousDays, currentDays);
+        for (int offset = 0; offset <= inclusiveDays; offset++) {
+            schedule(resourceId, today.plusDays(offset), origin);
+        }
+    }
+
+    private void scheduleClosure(long resourceId, LocalDate date, String origin) {
+        if (invalidation == null || date == null) {
+            return;
+        }
+        if (resourceId != 0) {
+            schedule(resourceId, date, origin);
+            return;
+        }
+        List<Long> enabledResourceIds = resourceMapper.selectEnabledIdsForCacheInvalidation();
+        if (enabledResourceIds == null) {
+            return;
+        }
+        enabledResourceIds.stream()
+                .filter(id -> id != null && id > 0)
+                .distinct()
+                .forEach(id -> schedule(id, date, origin));
+    }
+
+    private void schedule(long resourceId, LocalDate date, String origin) {
+        invalidation.scheduleAfterCommit(new AvailabilityInvalidationRequest(
+                AvailabilityCacheKey.of(resourceId, date), origin));
     }
 
     private record NormalizedRule(int dayOfWeek, LocalTime startTime, LocalTime endTime) {}
