@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mapAdminApprovalError } from '../../src/api/adminApprovals.js';
 import { mapAdminUserError } from '../../src/api/adminUsers.js';
 
 test('business codes map to actionable Chinese messages', () => {
@@ -23,6 +24,20 @@ test('response envelope code wins over http status', () => {
     code: 41000,
   });
   assert.match(err.adminMessage, /状态更新被拒绝/);
+});
+
+test('canonical response code wins over Axios string error.code', () => {
+  const userError = Object.assign(new Error('Request failed'), {
+    code: 'ERR_BAD_REQUEST',
+    response: { status: 409, data: { code: 41000 } },
+  });
+  assert.match(mapAdminUserError(userError).adminMessage, /状态更新被拒绝/);
+
+  const approvalError = Object.assign(new Error('Request failed'), {
+    code: 'ERR_BAD_REQUEST',
+    response: { status: 409, data: { code: 43000 } },
+  });
+  assert.match(mapAdminApprovalError(approvalError).adminMessage, /预约状态冲突/);
 });
 
 test('unknown errors keep their original message as last resort', () => {

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
-import { createAdminUsersCore, openAdminUsersApi } from '../api/adminUsers';
+import { reactive } from 'vue';
+import { createAdminUsersCore, createAdminUsersState, openAdminUsersApi } from '../api/adminUsers';
 
 export const useAdminUsersStore = defineStore('adminUsers', {
   state: () => ({
@@ -18,7 +19,7 @@ export const useAdminUsersStore = defineStore('adminUsers', {
   actions: {
     async ensure() {
       if (!this.core) {
-        this.core = createAdminUsersCore(await openAdminUsersApi());
+        this.core = createAdminUsersCore(await openAdminUsersApi(), reactive(createAdminUsersState()));
       }
       return this.core;
     },

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
-import { createAdminApprovalsCore, openAdminApprovalsApi } from '../api/adminApprovals';
+import { reactive } from 'vue';
+import { createAdminApprovalsCore, createAdminApprovalsState, openAdminApprovalsApi } from '../api/adminApprovals';
 
 export const useAdminApprovalsStore = defineStore('adminApprovals', {
   state: () => ({
@@ -17,7 +18,7 @@ export const useAdminApprovalsStore = defineStore('adminApprovals', {
   actions: {
     async ensure() {
       if (!this.core) {
-        this.core = createAdminApprovalsCore(await openAdminApprovalsApi());
+        this.core = createAdminApprovalsCore(await openAdminApprovalsApi(), reactive(createAdminApprovalsState()));
       }
       return this.core;
     },

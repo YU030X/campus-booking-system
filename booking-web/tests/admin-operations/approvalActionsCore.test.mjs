@@ -105,13 +105,14 @@ test('approve sets an unconditional action-sourced terminal selection', async ()
   assert.equal(core.state.selected.phase, 'none', 'no pre-selection required');
 
   const op = core.requestAction('306', 'approve', null);
-  transport.pendingAction[0].resolve(booking('306', { status: 'APPROVED' }));
+  transport.pendingAction[0].resolve(booking('306', { status: 'CONFIRMED' }));
+  await Promise.resolve();
   transport.pendingList[1].resolve({ records: [], pageNumber: 1, pageSize: 10, total: 0 });
   await op.catch(() => {});
 
   assert.equal(core.state.selected.phase, 'ready');
   assert.equal(core.state.selected.source, 'action');
-  assert.equal(core.state.selected.booking.status, 'APPROVED');
+  assert.equal(core.state.selected.booking.status, 'CONFIRMED');
 });
 
 test('pending refresh clears stale list-source selection and never drops action-terminal detail', async () => {
@@ -119,7 +120,7 @@ test('pending refresh clears stale list-source selection and never drops action-
   const core = createAdminApprovalsCore(transport);
   await seed(core, transport, [booking('401'), booking('402')]);
 
-  core.setSelectedFrom(booking({ id: '401', bookingNo: 'BK000000401', attendeeCount: 5 }));
+  core.setSelectedFrom(booking('401', { bookingNo: 'BK000000401', attendeeCount: 5 }));
   const gone = core.refreshTruth();
   transport.pendingList[1].resolve({
     records: [{ ...booking('402') }],
@@ -132,11 +133,12 @@ test('pending refresh clears stale list-source selection and never drops action-
   assert.equal(core.state.selected.source, null);
 
   const op = core.requestAction('402', 'approve', null);
-  transport.pendingAction[0].resolve(booking('402', { status: 'APPROVED' }));
+  transport.pendingAction[0].resolve(booking('402', { status: 'CONFIRMED' }));
+  await Promise.resolve();
   transport.pendingList[2].resolve({ records: [], pageNumber: 1, pageSize: 10, total: 0 });
   await op.catch(() => {});
   assert.equal(core.state.selected.source, 'action');
-  assert.equal(core.state.selected.booking.status, 'APPROVED');
+  assert.equal(core.state.selected.booking.status, 'CONFIRMED');
 
   const laterRefresh = core.refreshTruth();
   transport.pendingList[3].resolve({ records: [booking('499')], pageNumber: 1, pageSize: 10, total: 1 });
@@ -175,14 +177,14 @@ test('approve sends exact trimmed/comment-null body once per identical click', a
   const blankCommentOp = core.requestAction('301', 'approve', '   ').catch((error) => error);
   const sameKeyShared = core.requestAction('301', 'approve', '   ');
   void sameKeyShared;
-  transport.pendingAction[0].resolve(booking('301', { status: 'APPROVED' }));
+  transport.pendingAction[0].resolve(booking('301', { status: 'CONFIRMED' }));
   const outcome = await blankCommentOp;
-  assert.ok(outcome && outcome.status === 'APPROVED');
+  assert.ok(outcome && outcome.status === 'CONFIRMED');
   assert.deepEqual(transport.calls.action[0], { id: '301', name: 'approve', body: { comment: null } });
   assert.equal(transport.calls.action.length, 1);
 
   const commented = core.requestAction('301', 'approve', ' 紧急场地 ');
-  transport.pendingAction[1].resolve(booking('301', { status: 'APPROVED' }));
+  transport.pendingAction[1].resolve(booking('301', { status: 'CONFIRMED' }));
   await commented;
   assert.deepEqual(
     transport.calls.action[1],
@@ -195,7 +197,7 @@ test('reject validates client-side and posts trimmed required comment', async ()
   const core = createAdminApprovalsCore(transport);
   await seed(core, transport, [booking('302')]);
 
-  await assert.rejects(core.requestAction('302', 'reject', '   '), /必填/);
+  assert.throws(() => core.requestAction('302', 'reject', '   '), /必填/);
   assert.equal(transport.calls.action.length, 0, 'invalid reject must block the request');
 
   const op = core.requestAction('302', 'reject', ' 与课程冲突 ');
@@ -217,14 +219,15 @@ test('action success settles first, updates selected detail, tolerates refetch f
     (value) => ({ ok: true, value }),
     (error) => ({ ok: false, error }),
   );
-  transport.pendingAction[0].resolve(booking('303', { status: 'APPROVED' }));
+  transport.pendingAction[0].resolve(booking('303', { status: 'CONFIRMED' }));
+  await Promise.resolve();
   transport.pendingList[1].reject({ response: { status: 500 }, message: 'refetch boom' });
   const outcome = await op;
 
   assert.ok(outcome.ok);
   assert.equal(core.state.actions['303'].phase, 'success');
   assert.equal(core.state.selected.source, 'action');
-  assert.equal(core.state.selected.booking.status, 'APPROVED');
+  assert.equal(core.state.selected.booking.status, 'CONFIRMED');
   assert.equal(core.state.page.phase, 'error');
   assert.ok(transport.calls.list.length >= 2);
 });
@@ -265,7 +268,7 @@ test('same click shares promise; opposite concurrent action is refused until set
   assert.strictEqual(approve, shared);
   assert.throws(() => core.requestAction('305', 'reject', 'no'), /进行中/);
 
-  transport.pendingAction[0].resolve(booking('305', { status: 'APPROVED' }));
+  transport.pendingAction[0].resolve(booking('305', { status: 'CONFIRMED' }));
   await approve;
 
   const rejectAfterSettle = core.requestAction('305', 'reject', 'too late');
