@@ -11,6 +11,8 @@ Run from the worktree root:
 .\scripts\tests\t12\run.ps1 -Mode Notifications
 .\scripts\tests\t12\run.ps1 -Mode Statistics
 .\scripts\tests\t12\run.ps1 -Mode Frontend
+.\scripts\tests\t12\run.ps1 -Mode Flags
+.\scripts\tests\t12\run.ps1 -Mode CutMatrix
 .\scripts\tests\t12\run.ps1 -Mode Unit
 ```
 
@@ -30,3 +32,10 @@ deterministic pure/narrow checks. They are not substitutes for `RealCache`.
 `Frontend` runs the notification/statistics Node contract suite and then the
 production `npm run build`; it requires the pinned `booking-web` dependencies
 to be installed.
+
+`Flags` verifies the four independent `booking.*.enabled` opt-in annotations
+and their explicit `${BOOKING_*_ENABLED:false}` environment bindings.
+`CutMatrix` first runs `Flags`, then runs the complete `booking/**` T07 test
+selection three times while cutting statistics, notifications, and cache in
+that order. Its real MySQL/Redis cases require the same private `DB_*` /
+`RESOURCE_MYSQL_*` and `REDIS_*` environment described above.

@@ -4,8 +4,8 @@
   - UNCHECKED — evidence: worktree/branch match, but the pinned `0e53b7e` is an unreachable historical object and the equivalent shared base is `2ffae9d`. Planning is committed in `eb8a1b3`, main is merged in `bb99e92`, and the T09/T10 chain is merged in `bd7728a`; only the four pre-existing staged docs remain. The base-hash wording still requires a separate confirmed planning revision before this checkbox can be truthful.
 - [x] 0.2 Obtain and review auditable T06/T07/T09/T10 and `add-redis-concurrency-foundation` artifacts/owner handoffs. Their sibling planning artifacts exist but are unmerged/unreviewed; record committed descendant and review evidence before proceeding, and do not treat uncommitted planning as satisfying the merged/reviewed gate.
   - CHECKED — evidence: main merge `bb99e92` contains T06 availability `2d5aee4`, Redis foundation `99a8dce` plus hardening `0b05aa6` and archive `f8d1671`; dependency merge `bd7728a` imports committed T07 booking core handoff `cc3dd17`, complete T10 lifecycle `9a096c7` (27/27), and complete T09 approval/cancellation `d81578b` (22/22). Their controllers/services/ports and OpenSpec artifacts were reread before implementation; no owner package was edited by this slice.
-- [ ] 0.3 Obtain shared-config and frontend single-writer handoffs for four independent default-false flags and notification/statistics route/API entries. T12 must not edit frozen routes/contracts; P1 entries are appended only by the corresponding owner after accepting the handoff. Do not edit config, router, HTTP, contracts, pom, SQL, common, or deploy files.
-  - UNCHECKED — evidence: no owner acceptance artifacts found anywhere in repo. Operation-log flag is self-contained behind `@ConditionalOnProperty(booking.operation-log.enabled, matchIfMissing=false)` in `OperationLogConfiguration.java:28-30` with no shared-config edits, i.e. an **operation-log partial handoff only**; cache/notification/statistics flags and all P1 routes remain un-handed-off.
+- [x] 0.3 Obtain shared-config and frontend single-writer handoffs for four independent default-false flags and notification/statistics route/API entries. T12 must not edit frozen routes/contracts; P1 entries are appended only by the corresponding owner after accepting the handoff. Do not edit config, router, HTTP, contracts, pom, SQL, common, or deploy files.
+  - CHECKED — shared-config owner `a5b01fb` binds four independent `${BOOKING_*_ENABLED:false}` switches and adds a centralized activation contract; shared frontend owner `c0e06f1` appends only the accepted notification/statistics routes, API mapping, views, and tests. Both owner commits were merged into T12 without pom/SQL/common/deploy changes.
 
 ## 1. Observable operation log (highest implementation priority)
 
@@ -35,8 +35,8 @@
 
 ## 3. Optional in-app notifications
 
-- [ ] 3.1 After the event and shared-route handoffs, define exact entity/DTO/VO boundaries under `notification/**` and agreed P1 frontend notification directories; keep Long IDs stringified and fields within 100/1000/30 limits.
-  - UNCHECKED / PARTIAL — backend entity/mapper/event/VO boundaries exist under `notification/{entity,mapper,event,vo,service,controller,config}` including bounded `NotificationRequestedEvent`; producer owner handoffs are now accepted and merged through `88eb8cb`/`e5ebc37` plus their real-integration evidence `89607a9`/`12b476c`. The remaining gate is shared-route/layout/frontend single-writer acceptance for the P1 notification directories.
+- [x] 3.1 After the event and shared-route handoffs, define exact entity/DTO/VO boundaries under `notification/**` and agreed P1 frontend notification directories; keep Long IDs stringified and fields within 100/1000/30 limits.
+  - CHECKED — bounded backend boundaries exist under `notification/{entity,mapper,event,vo,service,controller,config}`; producer owners are accepted through `88eb8cb`/`e5ebc37` and real-integration evidence `89607a9`/`12b476c`. Frontend owner `c0e06f1` maps canonical string IDs and the numeric `isRead` wire field into UI state under the accepted API/view/test directories.
 - [x] 3.2 Implement authenticated current-user `GET /api/v1/notifications` with pageNumber/pageSize bounds and createdAt/id descending ordering.
   - CHECKED — source evidence: `notification/controller/NotificationController.java:31` (`@GetMapping`) with current-user scoping and pagination bounds in service layer. The notification unit and real-MySQL integration slices verified ordering and bounds.
 - [x] 3.3 Implement owner-only idempotent `POST /api/v1/notifications/{id}/read`; verify foreign/missing IDs do not leak data or mutate state.
@@ -45,7 +45,8 @@
   - CHECKED — `NotificationDelivery` consumes only `AFTER_COMMIT`, runs one REQUIRES_NEW unit, locks the recipient row before null-safe `(userId,type,bizId)` dedup and insert, and adds no schema or external channel. Approval/reject/late-cancel owner `88eb8cb` and no-show owner `e5ebc37` publish only WINNER events inside their business transactions. Real MySQL owner suites passed 8/8 and 4/4, proving committed delivery, rollback zero-row, repeated/concurrent winner single-row behavior; `scripts/tests/t12/run.ps1 -Mode Notifications` passed 35/35 and separately proves direct rollback, NULL-bizId identity, and the barrier-backed concurrent first delivery count=1.
 - [x] 3.5 Add API/security/integration tests for 401/403/404, pagination/order, field boundaries, ownership, repeat-read idempotency, post-commit/rollback, NULL-bizId identity, and a two-consumer concurrent double-delivery test asserting final count=1.
   - CHECKED — `scripts/tests/t12/run.ps1 -Mode Notifications` passed its complete real-MySQL slice with no skips; `NotificationMysqlIntegrationTest` covers pagination/order, ownership/not-found, post-commit/rollback, NULL-bizId identity, and the barrier-backed concurrent first-delivery count=1 proof. The full real-environment verify also passed 376/376.
-- [ ] 3.6 Add only agreed P1 frontend API/views/components/tests; route/HTTP/contracts changes remain handoffs. Run `npm run build` if UI files are added and record exact output.
+- [x] 3.6 Add only agreed P1 frontend API/views/components/tests; route/HTTP/contracts changes remain handoffs. Run `npm run build` if UI files are added and record exact output.
+  - CHECKED — owner `c0e06f1` adds the authenticated notification page, read action, paging/loading/error/empty states, pure wire mapping, shared route/layout entry, and two contract files. `-Mode Frontend` passed 6/6 and Vite production build succeeded.
 
 ## 4. Optional administrator statistics (lowest priority)
 
@@ -57,13 +58,16 @@
   - CHECKED — real MySQL 8 EXPLAIN used the existing `idx_resource_day`, `uk_resource_date`, `uk_resource_slot`, and `idx_resource_start` access paths; no `sql/**` change or new-index request was needed.
 - [x] 4.4 Add MySQL 8 integration tests, SQL `EXPLAIN` evidence, DTO/no-PII assertions, and 401/403/security tests. Record real commands/results.
   - CHECKED — `scripts/tests/t12/run.ps1 -Mode Statistics` passed 20/20 with real MySQL 8 and emitted the aggregate EXPLAIN plan; the full real-environment verify passed 376/376 with zero skips.
-- [ ] 4.5 Add only agreed P1 frontend statistics API/views/tests; run `npm run build` when UI is added and run `git diff --check`.
+- [x] 4.5 Add only agreed P1 frontend statistics API/views/tests; run `npm run build` when UI is added and run `git diff --check`.
+  - CHECKED — owner `c0e06f1` adds ADMIN-only routing, inclusive date-range validation (maximum 366 days), resource/booking aggregates, null usage-rate rendering, and contract tests. `-Mode Frontend` passed 6/6 and the production build succeeded; final `git diff --check` passed.
 
 ## 5. Final acceptance and handoff
 
-- [ ] 5.1 Run the relevant backend suite and `mvn verify`; run frontend build only when T12 UI exists; preserve separate evidence for real Redis and MySQL 8/EXPLAIN checks.
-  - UNCHECKED / PARTIAL — all prior T12 narrow modes and real MySQL/Redis `mvn verify` passed; real MySQL 8/EXPLAIN evidence is recorded under 4.3/4.4, and the new dedicated real Redis cache adapter suite passed 1/1. Final acceptance remains open for availability/owner wiring, independent feature-cut proof, and any accepted P1 frontend handoffs.
+- [x] 5.1 Run the relevant backend suite and `mvn verify`; run frontend build only when T12 UI exists; preserve separate evidence for real Redis and MySQL 8/EXPLAIN checks.
+  - CHECKED — final real-environment `mvn verify` passed 387/387 with 0 failures/errors/skips and emitted MySQL 8 EXPLAIN evidence; cache RealCache separately passed 5/5 against Redis 7; frontend contracts passed 6/6 and Vite production build succeeded. Narrow cache 29/29, notifications 35/35, and statistics 20/20 evidence remains separately recorded.
 - [x] 5.2 Run `openspec validate add-supporting-capabilities --type change --strict --no-interactive` and `git diff --check`; fix artifact issues without editing implementation files.
   - CHECKED — strict OpenSpec validation reported `Change 'add-supporting-capabilities' is valid`; `git diff --check` completed without errors.
-- [ ] 5.3 Verify each feature can independently remain disabled/default-false and that cutting statistics, then notifications, then cache leaves P0 booking correctness and T07 tests unchanged.
-- [ ] 5.4 Prepare owner handoff notes, risks, rollback (flag off), unrun checks, and spec-sync instructions; do not sync/archive/commit/push in this planning-only workflow.
+- [x] 5.3 Verify each feature can independently remain disabled/default-false and that cutting statistics, then notifications, then cache leaves P0 booking correctness and T07 tests unchanged.
+  - CHECKED — `-Mode Flags` passed 4/4 and locks each independent `@ConditionalOnProperty(... havingValue=true, matchIfMissing=false)` plus four explicit environment defaults. `-Mode CutMatrix` then cumulatively cut statistics, notifications, and cache; every complete `booking/**` T07 run passed 82/82 with real MySQL/Redis cases and no failure/error/skip.
+- [x] 5.4 Prepare owner handoff notes, risks, rollback (flag off), unrun checks, and spec-sync instructions; do not sync/archive/commit/push in this planning-only workflow.
+  - CHECKED — `HANDOFF.md` records owner commits, exact flags and rollback, acceptance, known risks, deliberately unrun browser/latency/deployment checks, the unresolved task-0.1 confirmation, and spec-sync/archive sequencing. No push or archive was performed.

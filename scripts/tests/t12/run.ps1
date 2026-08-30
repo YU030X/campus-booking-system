@@ -3,7 +3,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('Check', 'List', 'OperationLog', 'Cache', 'RealCache', 'Notifications', 'Statistics', 'Frontend', 'Unit')]
+    [ValidateSet('Check', 'List', 'OperationLog', 'Cache', 'RealCache', 'Notifications', 'Statistics', 'Frontend', 'Flags', 'CutMatrix', 'Unit')]
     [string]$Mode = 'Check'
 )
 
@@ -89,6 +89,40 @@ function Invoke-FrontendTests {
     Write-Info 'OK: frontend tests and build finished.'
 }
 
+function Invoke-FlagTests {
+    Write-Info 'Verifying four independent opt-in flags and explicit environment defaults:'
+    Invoke-SliceTests 'com.yu030x.booking.common.config.ApplicationConfigurationStaticTest,com.yu030x.booking.common.config.SupportingCapabilitiesActivationTest,com.yu030x.booking.notification.NotificationConfigurationActivationTest'
+}
+
+function Invoke-BookingCutStage {
+    param(
+        [string]$Stage,
+        [string[]]$DisabledProperties
+    )
+    Write-Info ("Cut stage '{0}': explicit false = {1}; all other supporting flags keep application.yml default false. Running complete booking/T07 selection." -f
+        $Stage, ($DisabledProperties -join ', '))
+    Push-Location $apiDir
+    try {
+        $arguments = @(
+            'test',
+            '-Dtest=com.yu030x.booking.booking.**'
+        )
+        $arguments += $DisabledProperties | ForEach-Object { "-D$($_)=false" }
+        & mvn @arguments
+        if ($LASTEXITCODE -ne 0) { throw "mvn cut stage '$Stage' exited with $LASTEXITCODE" }
+    } finally {
+        Pop-Location
+    }
+}
+
+function Invoke-CutMatrix {
+    Invoke-FlagTests
+    Invoke-BookingCutStage 'statistics-off' @('booking.statistics.enabled')
+    Invoke-BookingCutStage 'notifications-off' @('booking.statistics.enabled', 'booking.notifications.enabled')
+    Invoke-BookingCutStage 'cache-off' @('booking.statistics.enabled', 'booking.notifications.enabled', 'booking.cache.enabled')
+    Write-Info 'OK: ordered feature-cut matrix finished.'
+}
+
 switch ($Mode) {
     'Check' {
         Write-Info 'Static checks only:'
@@ -119,6 +153,8 @@ switch ($Mode) {
     'Notifications'{ Invoke-SliceTests $slices[2].Selector }
     'Statistics'   { Invoke-SliceTests $slices[3].Selector }
     'Frontend'     { Invoke-FrontendTests }
+    'Flags'        { Invoke-FlagTests }
+    'CutMatrix'    { Invoke-CutMatrix }
     'Unit' {
         $combined = ($slices | ForEach-Object { $_.Selector }) -join ','
         Invoke-SliceTests $combined 'real-redis'
