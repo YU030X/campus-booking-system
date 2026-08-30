@@ -3,6 +3,7 @@ package com.yu030x.booking.resource.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.yu030x.booking.resource.entity.ResourceEntity;
+import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -38,6 +39,9 @@ public interface ResourceMapper extends BaseMapper<ResourceEntity> {
             + "max_advance_days,min_duration_minutes,max_duration_minutes,status,deleted,created_at,updated_at "
             + "FROM resource WHERE id=#{id} AND deleted=0 FOR UPDATE")
     ResourceEntity selectActiveForUpdate(@Param("id") long id);
+
+    @Select("SELECT id FROM resource WHERE deleted=0 AND status=1 ORDER BY id")
+    List<Long> selectEnabledIdsForCacheInvalidation();
 
     @Update("UPDATE resource SET category_id=#{entity.categoryId},name=#{entity.name},"
             + "location=#{entity.location},capacity=#{entity.capacity},description=#{entity.description},"

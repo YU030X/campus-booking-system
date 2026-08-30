@@ -1,0 +1,6 @@
+# Local run evidence for t12 (screenshots, logs, mvn output, temp reports)
+*.log
+*.txt
+out/
+target/
+surefire-reports/

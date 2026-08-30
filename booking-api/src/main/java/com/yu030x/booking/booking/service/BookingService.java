@@ -9,6 +9,7 @@ import com.yu030x.booking.common.api.BookingStatus;
 import com.yu030x.booking.common.api.PageResult;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
+import com.yu030x.booking.log.annotation.OperationLog;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yu030x.booking.user.UserRole;
@@ -30,6 +31,7 @@ public class BookingService {
         this.creator = creator;
     }
 
+    @OperationLog("booking_create")
     public BookingView create(BookingPrincipal principal, CreateBookingRequest request) {
         requireStudent(principal);
         BookingIntervalValidator.ParsedInterval interval =

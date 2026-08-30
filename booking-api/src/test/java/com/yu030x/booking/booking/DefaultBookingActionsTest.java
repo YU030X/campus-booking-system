@@ -16,6 +16,8 @@ import com.yu030x.booking.booking.service.BookingActionOutcome;
 import com.yu030x.booking.booking.service.BookingActions;
 import com.yu030x.booking.booking.service.BookingSlotReleaseService;
 import com.yu030x.booking.booking.service.DefaultBookingActions;
+import com.yu030x.booking.cache.invalidate.AfterCommitInvalidationCoordinator;
+import com.yu030x.booking.cache.invalidate.AvailabilityInvalidationRequest;
 import com.yu030x.booking.common.api.BookingStatus;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
@@ -36,20 +38,24 @@ class DefaultBookingActionsTest {
 
     private BookingMapper bookingMapper;
     private BookingSlotReleaseService slotRelease;
+    private AfterCommitInvalidationCoordinator invalidation;
     private BookingActions actions;
 
     @BeforeEach
     void setUp() {
         bookingMapper = mock(BookingMapper.class);
         slotRelease = mock(BookingSlotReleaseService.class);
+        invalidation = mock(AfterCommitInvalidationCoordinator.class);
         actions = new DefaultBookingActions(bookingMapper, slotRelease,
-                Clock.fixed(NOW.atZone(ZONE).toInstant(), ZONE));
+                Clock.fixed(NOW.atZone(ZONE).toInstant(), ZONE), invalidation);
     }
 
     private BookingEntity entity(BookingStatus status) {
         BookingEntity entity = new BookingEntity();
         entity.setId(BOOKING_ID);
         entity.setUserId(OWNER_ID);
+        entity.setResourceId(7L);
+        entity.setStartTime(LocalDate.of(2026, 8, 27).atTime(14, 0));
         entity.setStatus(status);
         entity.setDeleted(0);
         return entity;
@@ -65,6 +71,7 @@ class DefaultBookingActionsTest {
         assertEquals(BookingActionOutcome.Result.WINNER, outcome.result());
         assertEquals(BookingStatus.CONFIRMED, outcome.booking().status());
         verifyNoInteractions(slotRelease);
+        verifyNoInteractions(invalidation);
     }
 
     @Test
@@ -76,6 +83,7 @@ class DefaultBookingActionsTest {
 
         assertEquals(BookingActionOutcome.Result.ALREADY_COMPLETED, outcome.result());
         verifyNoInteractions(slotRelease);
+        verifyNoInteractions(invalidation);
     }
 
     @Test
@@ -137,6 +145,12 @@ class DefaultBookingActionsTest {
         assertEquals(BookingActionOutcome.Result.WINNER, actions.markNoShow(BOOKING_ID).result());
 
         verify(slotRelease, times(3)).releaseTerminalSlots(BOOKING_ID);
+        verify(invalidation).scheduleAfterCommit(new AvailabilityInvalidationRequest(
+                "resource:available-slots:7:2026-08-27", "booking_reject"));
+        verify(invalidation).scheduleAfterCommit(new AvailabilityInvalidationRequest(
+                "resource:available-slots:7:2026-08-27", "booking_cancel"));
+        verify(invalidation).scheduleAfterCommit(new AvailabilityInvalidationRequest(
+                "resource:available-slots:7:2026-08-27", "booking_no_show"));
     }
 
     @Test
