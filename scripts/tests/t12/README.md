@@ -14,11 +14,14 @@ Run from the worktree root:
 ```
 
 `RealCache` requires a private Redis endpoint through `REDIS_HOST` and optional
-`REDIS_PORT`/`REDIS_PASSWORD`. It deliberately fails instead of skipping when
-the endpoint is unavailable. The mode verifies the exact key, real
+`REDIS_PORT`/`REDIS_PASSWORD`; its Cache Aside integration case additionally
+requires `RESOURCE_MYSQL_URL`/`RESOURCE_MYSQL_USERNAME`/
+`RESOURCE_MYSQL_PASSWORD` (or the `DB_*` equivalents). It deliberately fails
+instead of skipping when an endpoint is unavailable. The mode verifies the exact key, real
 MISS/write/HIT behavior, deterministic 300–900 second expiry, commit-only
-invalidation, rollback preservation, and adapter containment after a real
-Redisson client is shut down.
+invalidation, rollback preservation, DB recalculation after invalidation,
+availability fallback during a real Redisson outage, T07 lock fail-closed
+behavior, and adapter containment after a real Redisson client is shut down.
 
 `Cache` and `Unit` explicitly exclude the `real-redis` tag, so they remain
 deterministic pure/narrow checks. They are not substitutes for `RealCache`.

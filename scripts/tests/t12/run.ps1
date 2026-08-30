@@ -96,7 +96,7 @@ switch ($Mode) {
     }
     'OperationLog' { Invoke-SliceTests $slices[0].Selector }
     'Cache'        { Invoke-SliceTests $slices[1].Selector 'real-redis' }
-    'RealCache'    { Invoke-SliceTests 'com.yu030x.booking.cache.redis.RedissonAvailabilityCacheRealIntegrationTest' }
+    'RealCache'    { Invoke-SliceTests 'com.yu030x.booking.cache.redis.*RealIntegrationTest' }
     'Notifications'{ Invoke-SliceTests $slices[2].Selector }
     'Statistics'   { Invoke-SliceTests $slices[3].Selector }
     'Unit' {
