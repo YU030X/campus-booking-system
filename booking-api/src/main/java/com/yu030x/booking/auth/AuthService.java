@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.yu030x.booking.auth.security.JwtSettings;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
+import com.yu030x.booking.log.annotation.OperationLog;
 import com.yu030x.booking.user.User;
 import com.yu030x.booking.user.UserMapper;
 import com.yu030x.booking.user.UserRole;
@@ -12,7 +13,7 @@ import com.yu030x.booking.user.UserView;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -24,7 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@ConditionalOnBean(UserMapper.class)
+@ConditionalOnProperty(prefix = "booking.identity", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class AuthService {
     private static final String LOGIN_FAILED = "账号或密码错误";
 
@@ -75,6 +76,7 @@ public class AuthService {
         return UserView.from(persisted == null ? user : persisted);
     }
 
+    @OperationLog("auth_login")
     public LoginResponse login(LoginRequest request) {
         User user = findActiveByUsername(request.username());
         if (user == null) {

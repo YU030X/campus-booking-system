@@ -1,4 +1,13 @@
 <script setup>
 import { RouterView } from 'vue-router';
+import AuthenticatedLayout from './layouts/AuthenticatedLayout.vue';
 </script>
-<template><main style="padding:2rem;font-family:system-ui"><h1>Campus Booking</h1><RouterView /></main></template>
+
+<template>
+  <RouterView v-slot="{ Component, route }">
+    <AuthenticatedLayout v-if="!route.meta.public">
+      <component :is="Component" />
+    </AuthenticatedLayout>
+    <component v-else :is="Component" />
+  </RouterView>
+</template>

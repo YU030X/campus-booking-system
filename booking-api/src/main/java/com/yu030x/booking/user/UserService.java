@@ -7,15 +7,16 @@ import com.yu030x.booking.auth.security.BookingPrincipal;
 import com.yu030x.booking.common.api.PageResult;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
+import com.yu030x.booking.log.annotation.OperationLog;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@ConditionalOnBean(UserMapper.class)
+@ConditionalOnProperty(prefix = "booking.identity", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class UserService {
     private final UserMapper userMapper;
     private final Clock clock;
@@ -66,6 +67,7 @@ public class UserService {
     }
 
     @Transactional
+    @OperationLog("user_status_update")
     public UserView updateStatus(long id, UserStatusUpdateRequest request, BookingPrincipal principal) {
         if (id == principal.id() && request.status() == UserStatus.DISABLED.value()) {
             throw new BizException(ErrorCode.USER_ERROR, "administrator cannot disable self");
