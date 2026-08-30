@@ -22,6 +22,7 @@ import com.yu030x.booking.common.api.BookingStatus;
 import com.yu030x.booking.common.api.PageResult;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
+import com.yu030x.booking.notification.event.NotificationRequestedEvent;
 import com.yu030x.booking.violation.port.ViolationPort;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -30,6 +31,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 class ApprovalServiceTest {
     private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
@@ -41,6 +43,7 @@ class ApprovalServiceTest {
     private BookingActions bookingActions;
     private ViolationPort violationPort;
     private ApprovalRecordMapper approvalRecordMapper;
+    private ApplicationEventPublisher events;
     private ApprovalService service;
 
     @BeforeEach
@@ -49,8 +52,10 @@ class ApprovalServiceTest {
         bookingActions = mock(BookingActions.class);
         violationPort = mock(ViolationPort.class);
         approvalRecordMapper = mock(ApprovalRecordMapper.class);
+        events = mock(ApplicationEventPublisher.class);
         service = new ApprovalService(bookingAdminReads, bookingActions, violationPort,
-                approvalRecordMapper, Clock.fixed(NOW.atZone(SHANGHAI).toInstant(), SHANGHAI), SHANGHAI);
+                approvalRecordMapper, Clock.fixed(NOW.atZone(SHANGHAI).toInstant(), SHANGHAI),
+                SHANGHAI, events);
     }
 
     @Test
@@ -68,6 +73,8 @@ class ApprovalServiceTest {
         assertThat(captor.getValue().getApproverId()).isEqualTo(OPERATOR_ID);
         assertThat(captor.getValue().getAction()).isEqualTo("APPROVE");
         assertThat(captor.getValue().getComment()).isNull();
+        verify(events).publishEvent(new NotificationRequestedEvent(
+                5L, "预约已通过", "您的预约已通过审批", "BOOKING_APPROVED", BOOKING_ID));
     }
 
     @Test
@@ -82,6 +89,8 @@ class ApprovalServiceTest {
         verify(approvalRecordMapper).insert(captor.capture());
         assertThat(captor.getValue().getAction()).isEqualTo("REJECT");
         assertThat(captor.getValue().getComment()).isEqualTo("材料不全");
+        verify(events).publishEvent(new NotificationRequestedEvent(
+                5L, "预约未通过", "您的预约未通过审批", "BOOKING_REJECTED", BOOKING_ID));
     }
 
     @Test
@@ -95,6 +104,7 @@ class ApprovalServiceTest {
 
         assertThat(second.status()).isNotEqualTo(BookingStatus.PENDING_APPROVAL);
         verify(approvalRecordMapper, times(1)).insert(any());
+        verify(events, times(1)).publishEvent(any(NotificationRequestedEvent.class));
     }
 
     @Test
@@ -110,6 +120,7 @@ class ApprovalServiceTest {
                 .isInstanceOfSatisfying(BizException.class, e ->
                         assertThat(e.errorCode).isEqualTo(ErrorCode.NOT_FOUND));
         verifyNoInteractions(approvalRecordMapper);
+        verifyNoInteractions(events);
     }
 
     @Test
@@ -131,6 +142,7 @@ class ApprovalServiceTest {
 
         assertThat(view.status()).isEqualTo(BookingStatus.CANCELLED);
         verifyNoInteractions(violationPort);
+        verifyNoInteractions(events);
     }
 
     @Test
@@ -142,6 +154,8 @@ class ApprovalServiceTest {
         service.cancel(5L, BOOKING_ID, "行程有变");
 
         verify(violationPort).recordLateCancel(BOOKING_ID, 5L);
+        verify(events).publishEvent(new NotificationRequestedEvent(
+                5L, "违约提醒", "您在预约开始前两小时内取消，已记录违约", "VIOLATION", BOOKING_ID));
     }
 
     @Test
@@ -152,6 +166,7 @@ class ApprovalServiceTest {
         service.cancel(5L, BOOKING_ID, null);
 
         verifyNoInteractions(violationPort);
+        verifyNoInteractions(events);
     }
 
     @Test
@@ -164,6 +179,7 @@ class ApprovalServiceTest {
         assertThat(view.status()).isNotEqualTo(BookingStatus.PENDING_APPROVAL);
         verifyNoInteractions(violationPort);
         verifyNoInteractions(approvalRecordMapper);
+        verifyNoInteractions(events);
     }
 
     @Test
@@ -177,6 +193,7 @@ class ApprovalServiceTest {
                     assertThat(e.errorCode.httpStatus).isEqualTo(409);
                 });
         verifyNoInteractions(violationPort);
+        verifyNoInteractions(events);
     }
 
     @Test
