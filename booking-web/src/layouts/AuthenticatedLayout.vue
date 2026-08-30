@@ -19,6 +19,7 @@ const logout = async () => {
       <nav aria-label="Primary navigation">
         <RouterLink to="/resources">Resources</RouterLink>
         <RouterLink to="/bookings">Bookings</RouterLink>
+        <RouterLink to="/notifications">Notifications</RouterLink>
         <template v-if="isAdmin">
           <RouterLink to="/admin/categories">Categories</RouterLink>
           <RouterLink to="/admin/resources">Admin resources</RouterLink>
@@ -26,6 +27,7 @@ const logout = async () => {
           <RouterLink to="/admin/closures">Closures</RouterLink>
           <RouterLink to="/admin/approvals">Approvals</RouterLink>
           <RouterLink to="/admin/users">Users</RouterLink>
+          <RouterLink to="/admin/statistics">Statistics</RouterLink>
         </template>
         <el-button type="primary" @click="logout">Logout</el-button>
       </nav>

@@ -10,6 +10,7 @@ Run from the worktree root:
 .\scripts\tests\t12\run.ps1 -Mode RealCache
 .\scripts\tests\t12\run.ps1 -Mode Notifications
 .\scripts\tests\t12\run.ps1 -Mode Statistics
+.\scripts\tests\t12\run.ps1 -Mode Frontend
 .\scripts\tests\t12\run.ps1 -Mode Unit
 ```
 
@@ -25,3 +26,7 @@ behavior, and adapter containment after a real Redisson client is shut down.
 
 `Cache` and `Unit` explicitly exclude the `real-redis` tag, so they remain
 deterministic pure/narrow checks. They are not substitutes for `RealCache`.
+
+`Frontend` runs the notification/statistics Node contract suite and then the
+production `npm run build`; it requires the pinned `booking-web` dependencies
+to be installed.

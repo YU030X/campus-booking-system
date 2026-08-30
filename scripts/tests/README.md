@@ -14,9 +14,9 @@ Modes: `Check` boundary/diff checks, `List` case inventory, `Unit` Node tests,
 and `All` (default). Browser run evidence lands in the scope-local ignored
 `artifacts/` directory.
 
-### `t12/` — operation-log + availability-cache + notifications + statistics (`add-supporting-capabilities` §1–§4 backend slices)
+### `t12/` — operation-log + availability-cache + notifications + statistics (`add-supporting-capabilities` §1–§4)
 
-Entry: `pwsh scripts/tests/t12/run.ps1 [Check|List|OperationLog|Cache|RealCache|Notifications|Statistics|Unit]`
+Entry: `pwsh scripts/tests/t12/run.ps1 [Check|List|OperationLog|Cache|RealCache|Notifications|Statistics|Frontend|Unit]`
 (default `Check`). Maven modes are narrow Surefire selections from
 `booking-api/`; no `verify`, no aggregation into the full build.
 
@@ -34,6 +34,8 @@ Entry: `pwsh scripts/tests/t12/run.ps1 [Check|List|OperationLog|Cache|RealCache|
   (includes MySQL-backed integration classes; requires database access when run).
 - `Statistics`: `mvn test -Dtest=com.yu030x.booking.statistics.**`
   (includes MySQL-backed integration/EXPLAIN-oriented classes; requires database access when run).
+- `Frontend`: notification/statistics Node contract tests followed by the
+  production `npm run build`.
 - `Unit`: union selection of all four slice patterns in one surefire run:
   `-Dtest=com.yu030x.booking.log.**,com.yu030x.booking.cache.**,com.yu030x.booking.notification.**,com.yu030x.booking.statistics.**`.
 
