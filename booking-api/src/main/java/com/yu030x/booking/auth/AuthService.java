@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.yu030x.booking.auth.security.JwtSettings;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
+import com.yu030x.booking.log.annotation.OperationLog;
 import com.yu030x.booking.user.User;
 import com.yu030x.booking.user.UserMapper;
 import com.yu030x.booking.user.UserRole;
@@ -75,6 +76,7 @@ public class AuthService {
         return UserView.from(persisted == null ? user : persisted);
     }
 
+    @OperationLog("auth_login")
     public LoginResponse login(LoginRequest request) {
         User user = findActiveByUsername(request.username());
         if (user == null) {

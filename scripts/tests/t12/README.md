@@ -1,0 +1,24 @@
+# T12 supporting-capabilities acceptance
+
+Run from the worktree root:
+
+```powershell
+.\scripts\tests\t12\run.ps1 -Mode Check
+.\scripts\tests\t12\run.ps1 -Mode List
+.\scripts\tests\t12\run.ps1 -Mode OperationLog
+.\scripts\tests\t12\run.ps1 -Mode Cache
+.\scripts\tests\t12\run.ps1 -Mode RealCache
+.\scripts\tests\t12\run.ps1 -Mode Notifications
+.\scripts\tests\t12\run.ps1 -Mode Statistics
+.\scripts\tests\t12\run.ps1 -Mode Unit
+```
+
+`RealCache` requires a private Redis endpoint through `REDIS_HOST` and optional
+`REDIS_PORT`/`REDIS_PASSWORD`. It deliberately fails instead of skipping when
+the endpoint is unavailable. The mode verifies the exact key, real
+MISS/write/HIT behavior, deterministic 300–900 second expiry, commit-only
+invalidation, rollback preservation, and adapter containment after a real
+Redisson client is shut down.
+
+`Cache` and `Unit` explicitly exclude the `real-redis` tag, so they remain
+deterministic pure/narrow checks. They are not substitutes for `RealCache`.

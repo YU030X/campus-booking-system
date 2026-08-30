@@ -10,6 +10,7 @@ import com.yu030x.booking.resource.dto.TimeRuleRequest;
 import com.yu030x.booking.resource.entity.ResourceClosureEntity;
 import com.yu030x.booking.resource.entity.ResourceEntity;
 import com.yu030x.booking.resource.entity.ResourceTimeRuleEntity;
+import com.yu030x.booking.log.annotation.OperationLog;
 import com.yu030x.booking.resource.mapper.ResourceCategoryMapper;
 import com.yu030x.booking.resource.mapper.ResourceClosureMapper;
 import com.yu030x.booking.resource.mapper.ResourceMapper;
@@ -81,6 +82,7 @@ public class ResourceCatalogService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    @OperationLog("resource_update")
     public ResourceVO create(ResourceRequest request) {
         ResourceEntity entity = normalize(request);
         requireActiveCategory(entity.getCategoryId());
@@ -89,6 +91,7 @@ public class ResourceCatalogService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    @OperationLog("resource_update")
     public ResourceVO update(String rawId, ResourceRequest request) {
         long id = ResourceInputSupport.decimalId(rawId, true);
         if (id == 0 || resourceMapper.selectActiveForUpdate(id) == null) {
@@ -104,6 +107,7 @@ public class ResourceCatalogService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    @OperationLog("resource_update")
     public ResourceVO updateStatus(String rawId, String rawStatus) {
         long id = ResourceInputSupport.decimalId(rawId, true);
         if (rawStatus == null) {
@@ -120,6 +124,7 @@ public class ResourceCatalogService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    @OperationLog("resource_update")
     public List<TimeRuleVO> replaceTimeRules(String rawId, List<TimeRuleRequest> requests) {
         long resourceId = ResourceInputSupport.decimalId(rawId, true);
         List<NormalizedRule> normalized = normalizeRules(requests);
@@ -140,6 +145,7 @@ public class ResourceCatalogService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    @OperationLog("resource_update")
     public ClosureVO createClosure(String rawResourceId, ClosureRequest request) {
         long resourceId = ResourceInputSupport.decimalId(rawResourceId, true);
         if (request == null) {
@@ -167,6 +173,7 @@ public class ResourceCatalogService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    @OperationLog("resource_update")
     public void deleteClosure(String rawResourceId, String rawClosureId) {
         long resourceId = ResourceInputSupport.decimalId(rawResourceId, true);
         long closureId = ResourceInputSupport.decimalId(rawClosureId, false);
