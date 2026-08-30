@@ -138,7 +138,10 @@ const ERROR_BY_STATUS = {
 
 export function mapAdminApprovalError(error) {
   const status = error?.response?.status ?? error?.status ?? null;
-  const code = error?.code ?? error?.response?.data?.code ?? null;
+  const responseCode = error?.response?.data?.code;
+  const code = Number.isInteger(responseCode)
+    ? responseCode
+    : (Number.isInteger(error?.code) ? error.code : null);
   error.adminMessage = ERROR_BY_CODE[code] || ERROR_BY_STATUS[status] || error.userMessage || error.message || '操作失败';
   return error;
 }
@@ -154,11 +157,8 @@ function clampPageSize(value) {
   return Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
 }
 
-export function createAdminApprovalsCore(transport) {
-  if (!transport || typeof transport.list !== 'function' || typeof transport.action !== 'function') {
-    throw new TypeError('transport 需要提供 list/action');
-  }
-  const state = {
+export function createAdminApprovalsState() {
+  return {
     pageNumber: 1,
     pageSize: 10,
     page: { phase: 'idle', records: [], total: 0, pageNumber: 1, pageSize: 10, error: null },
@@ -167,8 +167,13 @@ export function createAdminApprovalsCore(transport) {
     inflight: {},
     sequence: 0,
   };
+}
 
-  async function fetchList({ force = false } = {}) {
+export function createAdminApprovalsCore(transport, state = createAdminApprovalsState()) {
+  if (!transport || typeof transport.list !== 'function' || typeof transport.action !== 'function') {
+    throw new TypeError('transport 需要提供 list/action');
+  }
+  function fetchList({ force = false } = {}) {
     const params = { pageNumber: state.pageNumber, pageSize: state.pageSize };
     const key = `list:${JSON.stringify(params)}`;
     if (!force) {
@@ -176,7 +181,7 @@ export function createAdminApprovalsCore(transport) {
       if (existing) return existing;
     }
     const sequence = ++state.sequence;
-    const task = Promise.resolve().then(async () => {
+    const task = (async () => {
       state.page = { ...state.page, phase: 'loading', error: null };
       try {
         const result = mapPendingPage(await transport.list(params));
@@ -204,7 +209,7 @@ export function createAdminApprovalsCore(transport) {
       } finally {
         delete state.inflight[key];
       }
-    });
+    })();
     state.inflight[key] = task;
     return task;
   }
@@ -278,12 +283,12 @@ export function createAdminApprovalsCore(transport) {
             adminMessage: mapAdminApprovalError(error).adminMessage,
             promise: null,
           };
+          settle.reject(error);
           try {
             await this.refreshTruth();
           } catch {
             /* truth refresh failure already surfaces through list phase */
           }
-          settle.reject(error);
         }
       };
       run();

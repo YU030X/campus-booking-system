@@ -58,7 +58,8 @@ class StatisticsSqlContractTest {
         assertThat(sql).contains("b.deleted = 0");
         assertThat(sql).contains("b.start_time >= #{rangeStart}");
         assertThat(sql).contains("b.start_time < #{rangeEndEx}");
-        assertThat(sql).contains("FIELD(b.status, 'PENDING_APPROVAL', 'CONFIRMED', 'CHECKED_IN', "
+        String normalized = sql.replaceAll("\\s+", " ");
+        assertThat(normalized).contains("FIELD(b.status, 'PENDING_APPROVAL', 'CONFIRMED', 'CHECKED_IN', "
                 + "'COMPLETED', 'REJECTED', 'CANCELLED', 'NO_SHOW')");
     }
 }

@@ -4,12 +4,14 @@ T11 admin-operations reusable test entry. Modes:
   Check - repository/static checks (boundary ownership + git diff --check)
   List  - enumerate pure test cases
   Unit  - run node --test against booking-web/tests/admin-operations
+  Smoke - verify local headless Chrome can launch
+  Browser - run real backend/frontend headless acceptance (services must be live)
   All   - Check + List + Unit (default), stop on first failure
 Artifacts (logs/screenshots/credentials) are written to artifacts\ and git-ignored locally.
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Check', 'List', 'Unit', 'All')]
+    [ValidateSet('Check', 'List', 'Unit', 'Smoke', 'Browser', 'All')]
     [string]$Mode = 'All'
 )
 
@@ -28,8 +30,12 @@ function Assert-Boundary {
     }
     $allow = @(
         '^booking-web/src/api/adminUsers\.js$',
+        '^booking-web/src/api/adminApprovals\.js$',
         '^booking-web/src/stores/adminUsers\.js$',
+        '^booking-web/src/stores/adminApprovals\.js$',
         '^booking-web/src/components/admin/users/',
+        '^booking-web/src/components/admin/approvals/',
+        '^booking-web/src/views/admin/approvals/',
         '^booking-web/src/views/admin/users/',
         '^booking-web/tests/admin-operations/',
         '^scripts/tests/t11/',
@@ -72,10 +78,21 @@ function Invoke-Unit {
     }
 }
 
+function Invoke-Harness([string]$Argument) {
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw '[Browser] node not found in PATH' }
+    $harness = Join-Path $PSScriptRoot 'qa-harness.mjs'
+    & node --check $harness
+    if ($LASTEXITCODE -ne 0) { throw '[Browser] qa-harness syntax check failed' }
+    & node $harness $Argument
+    if ($LASTEXITCODE -ne 0) { throw "[Browser] harness failed with exit $LASTEXITCODE" }
+}
+
 switch ($Mode) {
     'Check' { Assert-Boundary }
     'List' { Invoke-List }
     'Unit' { Invoke-Unit }
+    'Smoke' { Invoke-Harness '--smoke' }
+    'Browser' { Invoke-Harness '' }
     'All' {
         Assert-Boundary
         Invoke-List

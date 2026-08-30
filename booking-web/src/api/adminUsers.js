@@ -111,16 +111,16 @@ const ERROR_BY_STATUS = {
 
 export function mapAdminUserError(error) {
   const status = error?.response?.status ?? error?.status ?? null;
-  const code = error?.code ?? error?.response?.data?.code ?? null;
+  const responseCode = error?.response?.data?.code;
+  const code = Number.isInteger(responseCode)
+    ? responseCode
+    : (Number.isInteger(error?.code) ? error.code : null);
   error.adminMessage = ERROR_BY_CODE[code] || ERROR_BY_STATUS[status] || error.userMessage || error.message || '操作失败';
   return error;
 }
 
-export function createAdminUsersCore(transport) {
-  if (!transport || typeof transport.list !== 'function' || typeof transport.updateStatus !== 'function') {
-    throw new TypeError('transport 需要提供 list/updateStatus');
-  }
-  const state = {
+export function createAdminUsersState() {
+  return {
     filters: { keyword: '', role: '', status: '' },
     pageNumber: 1,
     pageSize: 10,
@@ -129,7 +129,12 @@ export function createAdminUsersCore(transport) {
     inflight: {},
     sequence: 0,
   };
+}
 
+export function createAdminUsersCore(transport, state = createAdminUsersState()) {
+  if (!transport || typeof transport.list !== 'function' || typeof transport.updateStatus !== 'function') {
+    throw new TypeError('transport 需要提供 list/updateStatus');
+  }
   const requestQuery = () => normalizeUsersQuery({
     pageNumber: state.pageNumber,
     pageSize: state.pageSize,
@@ -138,7 +143,7 @@ export function createAdminUsersCore(transport) {
     status: state.filters.status,
   });
 
-  async function fetchList({ force = false } = {}) {
+  function fetchList({ force = false } = {}) {
     const params = requestQuery();
     const key = requestQueryKey(params);
     if (!force) {
@@ -146,7 +151,7 @@ export function createAdminUsersCore(transport) {
       if (existing) return existing;
     }
     const sequence = ++state.sequence;
-    const task = Promise.resolve().then(async () => {
+    const task = (async () => {
       state.page = { ...state.page, phase: 'loading', error: null };
       try {
         const result = mapUserPage(await transport.list(params));
@@ -168,7 +173,7 @@ export function createAdminUsersCore(transport) {
       } finally {
         delete state.inflight[key];
       }
-    });
+    })();
     state.inflight[key] = task;
     return task;
   }
@@ -227,12 +232,12 @@ export function createAdminUsersCore(transport) {
           }
         } catch (error) {
           state.statusOps[userId] = { phase: 'error', error, adminMessage: mapAdminUserError(error).adminMessage, promise: null };
+          resolveOp.reject(error);
           try {
             await this.refreshTruth();
           } catch {
             /* truth refresh failure already surfaces through list phase */
           }
-          resolveOp.reject(error);
         }
       };
       run();

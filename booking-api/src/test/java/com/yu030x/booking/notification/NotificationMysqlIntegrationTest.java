@@ -37,11 +37,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  * NULL-bizId identity dedup, and the two-consumer barrier race asserting a
  * single inserted row.
  *
- * STATUS: sources are written ONLY and were neither compiled nor executed in
- * this session. Run with BOOKING_MYSQL8_TEST=true plus DB_URL, DB_USERNAME,
- * DB_PASSWORD against MySQL 8; the guard fails loudly when the target is not
- * MySQL >= 8 and nothing here may be quoted as passing evidence until an owned
- * verification run records the exact command and output.
+ * Run with BOOKING_MYSQL8_TEST=true plus DB_URL, DB_USERNAME and DB_PASSWORD
+ * against MySQL 8; the guard fails loudly when the target is not MySQL >= 8.
  */
 @SpringBootTest(classes = BookingApplication.class,
         properties = {"booking.notifications.enabled=true",

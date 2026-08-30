@@ -1,5 +1,9 @@
 package com.yu030x.booking.availability;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yu030x.booking.cache.key.AvailabilityCacheKey;
+import com.yu030x.booking.cache.port.AvailabilityCachePort;
+import com.yu030x.booking.cache.port.AvailabilityReadResult;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
 import com.yu030x.booking.resource.entity.ResourceEntity;
@@ -18,6 +22,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
@@ -31,14 +36,19 @@ public class AvailabilityService {
     private final ResourceClosureMapper closureMapper;
     private final BookingSlotMapper bookingSlotMapper;
     private final Clock clock;
+    private final AvailabilityCachePort cache;
+    private final ObjectMapper objectMapper;
 
     @Autowired
     public AvailabilityService(
             @Lazy ResourceMapper resourceMapper,
             @Lazy ResourceTimeRuleMapper timeRuleMapper,
             @Lazy ResourceClosureMapper closureMapper,
-            @Lazy BookingSlotMapper bookingSlotMapper) {
-        this(resourceMapper, timeRuleMapper, closureMapper, bookingSlotMapper, Clock.system(ZONE_ID));
+            @Lazy BookingSlotMapper bookingSlotMapper,
+            ObjectProvider<AvailabilityCachePort> cacheProvider,
+            ObjectMapper objectMapper) {
+        this(resourceMapper, timeRuleMapper, closureMapper, bookingSlotMapper,
+                Clock.system(ZONE_ID), cacheProvider.getIfAvailable(), objectMapper);
     }
 
     AvailabilityService(
@@ -47,11 +57,24 @@ public class AvailabilityService {
             ResourceClosureMapper closureMapper,
             BookingSlotMapper bookingSlotMapper,
             Clock clock) {
+        this(resourceMapper, timeRuleMapper, closureMapper, bookingSlotMapper, clock, null, null);
+    }
+
+    AvailabilityService(
+            ResourceMapper resourceMapper,
+            ResourceTimeRuleMapper timeRuleMapper,
+            ResourceClosureMapper closureMapper,
+            BookingSlotMapper bookingSlotMapper,
+            Clock clock,
+            AvailabilityCachePort cache,
+            ObjectMapper objectMapper) {
         this.resourceMapper = resourceMapper;
         this.timeRuleMapper = timeRuleMapper;
         this.closureMapper = closureMapper;
         this.bookingSlotMapper = bookingSlotMapper;
         this.clock = clock;
+        this.cache = cache;
+        this.objectMapper = objectMapper;
     }
 
     public AvailabilityVO get(long resourceId, LocalDate date) {
@@ -75,9 +98,16 @@ public class AvailabilityService {
             throw new BizException(ErrorCode.INVALID_PARAMETER, "invalid date");
         }
 
+        String cacheKey = cache == null ? null : AvailabilityCacheKey.of(resourceId, date);
+        AvailabilityVO cached = readCache(cacheKey, resourceId, date);
+        if (cached != null) {
+            return cached;
+        }
+
         AvailabilityVO empty = new AvailabilityVO(String.valueOf(resourceId), date, SLOT_MINUTES, List.of());
         if (closureMapper.selectByScopeAndDate(0, date) != null
                 || closureMapper.selectByScopeAndDate(resourceId, date) != null) {
+            writeCache(cacheKey, empty);
             return empty;
         }
 
@@ -101,7 +131,45 @@ public class AvailabilityService {
                         format(slot.end()),
                         !occupiedStarts.contains(slot.start())))
                 .toList();
-        return new AvailabilityVO(String.valueOf(resourceId), date, SLOT_MINUTES, result);
+        AvailabilityVO calculated = new AvailabilityVO(String.valueOf(resourceId), date, SLOT_MINUTES, result);
+        writeCache(cacheKey, calculated);
+        return calculated;
+    }
+
+    private AvailabilityVO readCache(String key, long resourceId, LocalDate date) {
+        if (key == null || objectMapper == null) {
+            return null;
+        }
+        AvailabilityReadResult result = cache.read(key);
+        if (!result.isHit()) {
+            return null;
+        }
+        try {
+            AvailabilityVO value = objectMapper.readValue(result.value(), AvailabilityVO.class);
+            if (value != null
+                    && String.valueOf(resourceId).equals(value.resourceId())
+                    && date.equals(value.date())
+                    && value.slotMinutes() == SLOT_MINUTES
+                    && value.slots() != null
+                    && value.slots().stream().allMatch(slot -> slot != null)) {
+                return value;
+            }
+        } catch (Exception malformedOrIncompatiblePayload) {
+            // A cache payload is never authoritative; fall through to the DB calculation.
+        }
+        cache.invalidate(key);
+        return null;
+    }
+
+    private void writeCache(String key, AvailabilityVO value) {
+        if (key == null || objectMapper == null) {
+            return;
+        }
+        try {
+            cache.write(key, objectMapper.writeValueAsString(value));
+        } catch (Exception serializationFailure) {
+            // Availability remains available from the database result already calculated.
+        }
     }
 
     private List<AvailabilityCalculator.Interval> intervalsFor(long resourceId, LocalDate date) {

@@ -170,7 +170,6 @@ class NotificationServiceTest {
         assertThatThrownBy(() -> service.markReadForCurrentUser(5L, 999_999L))
                 .isInstanceOfSatisfying(BizException.class,
                         e -> assertThat(e.errorCode).isEqualTo(ErrorCode.NOT_FOUND));
-        verify(mapper, never()).markRead(org.mockito.ArgumentMatchers.eq(999_999L),
-                org.mockito.ArgumentMatchers.anyLong());
+        verify(mapper).markRead(999_999L, 5L);
     }
 }

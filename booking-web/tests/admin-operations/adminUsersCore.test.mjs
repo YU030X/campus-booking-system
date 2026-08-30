@@ -75,6 +75,7 @@ test('failed truth refresh after successful PATCH keeps op success and only fail
 
   const op = core.changeStatus('21', 0).then((value) => ({ ok: true, value }), (error) => ({ ok: false, error }));
   transport.pendingStatus[0].resolve(user('21', { status: 0 }));
+  await Promise.resolve();
   transport.pendingList[1].reject({ response: { status: 500 }, message: 'refetch boom' });
   const outcome = await op;
 
@@ -121,7 +122,7 @@ test('failed load exposes retry which forces a fresh request', async () => {
   transport.pendingList[0].reject({ response: { status: 500 }, message: 'boom' });
   await assert.rejects(attempt);
   assert.equal(core.state.page.phase, 'error');
-  assert.match(core.state.page.error.adminMessage, /操作失败/);
+  assert.equal(core.state.page.error.adminMessage, 'boom');
 
   const retried = core.retry();
   transport.pendingList[1].resolve({ records: [user('9')], pageNumber: 1, pageSize: 10, total: 1 });
@@ -181,10 +182,10 @@ test('self-disable 409 is actionable, preserves filters/form, refreshes server t
   await seed(core, transport, [user('1', { role: 'ADMIN' })]);
 
   const op = core.changeStatus('1', 0).catch((error) => error);
-  transport.pendingStatus[0].reject({
+  transport.pendingStatus[0].reject(Object.assign(new Error('administrator cannot disable self'), {
     response: { status: 409, data: { code: 41000, message: 'administrator cannot disable self' } },
     code: 41000,
-  });
+  }));
   const thrown = await op;
 
   assert.ok(thrown instanceof Error);

@@ -48,7 +48,7 @@ public class NotificationDelivery {
      * bearer style key=value or key:value assignments.
      */
     private static final Pattern SECRET_KV = Pattern.compile(
-            "(?i)\\b(password|passwd|pwd|secret|token|credential|authorization"
+            "(?i)\\b(?:[a-z0-9]+[_-])?(password|passwd|pwd|secret|token|credential|authorization"
                     + "|api[_-]?key|access[_-]?key|jwt|bearer)s?\\s*[:=]\\s*\\S+");
     /** jdbc / redis userinfo credentials (rediss and common postgres schemes included). */
     private static final Pattern URI_USERINFO = Pattern.compile(

@@ -71,7 +71,7 @@ public final class AvailabilityCacheKey {
             // must also be rejected so downstream Long-based handling stays lossless.
             long resourceIdValue = Long.parseLong(idSegment);
             return resourceIdValue > 0L && LocalDate.parse(daySegment).toString().equals(daySegment);
-        } catch (NumberFormatException beyondLongRange | DateTimeParseException notACanonicalDay) {
+        } catch (NumberFormatException | DateTimeParseException invalidKeySegment) {
             return false;
         }
     }

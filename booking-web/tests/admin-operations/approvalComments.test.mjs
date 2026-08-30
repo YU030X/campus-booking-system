@@ -21,9 +21,9 @@ test('approve comment enforces a 500 Unicode code point ceiling', () => {
 
 test('code point counting counts astral pairs once', () => {
   assert.equal(codePointLength('😀'.repeat(251)), 251);
-  assert.throws(() => normalizeApproveComment('😀'.repeat(251)), /500/, '502 code points must be rejected');
-  assert.doesNotThrow(() => normalizeApproveComment('😀'.repeat(250)), '500 code points must pass');
-  assert.equal('😀'.repeat(251).length, 502, 'utf-16 length would wrongly allow astral flooding');
+  assert.doesNotThrow(() => normalizeApproveComment('😀'.repeat(500)), '500 code points must pass');
+  assert.throws(() => normalizeApproveComment('😀'.repeat(501)), /500/, '501 code points must be rejected');
+  assert.equal('😀'.repeat(501).length, 1002, 'UTF-16 length must not be used as the code-point limit');
 });
 
 test('reject comment requires 1..500 trimmed code points', () => {

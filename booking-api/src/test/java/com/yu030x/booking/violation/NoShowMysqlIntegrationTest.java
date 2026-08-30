@@ -35,7 +35,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * silently skips while claiming success.
  */
 @SpringBootTest(classes = BookingApplication.class,
-        properties = {"booking.security.jwt-secret=0123456789abcdef0123456789abcdef",
+        properties = {"booking.notifications.enabled=true",
+                "booking.security.jwt-secret=0123456789abcdef0123456789abcdef",
                 "springdoc.api-docs.enabled=false", "springdoc.swagger-ui.enabled=false"})
 @EnabledIfEnvironmentVariable(named = "BOOKING_MYSQL8_TEST", matches = "(?i:true)")
 class NoShowMysqlIntegrationTest {
@@ -68,6 +69,7 @@ class NoShowMysqlIntegrationTest {
             jdbcTemplate.update("DELETE FROM booking WHERE id = ?", bookingId);
         }
         for (Long userId : userIds) {
+            jdbcTemplate.update("DELETE FROM notification WHERE user_id = ?", userId);
             jdbcTemplate.update("DELETE FROM `user` WHERE id = ?", userId);
         }
     }
@@ -88,6 +90,7 @@ class NoShowMysqlIntegrationTest {
                 "SELECT credit_score FROM `user` WHERE id = ?", Integer.class, userId);
         assertThat(credit).isZero();
         assertThat(scalar("SELECT COUNT(*) FROM booking_slot WHERE booking_id = " + bookingId)).isZero();
+        assertThat(notificationCount(bookingId)).isEqualTo(1L);
     }
 
     @Test
@@ -103,6 +106,7 @@ class NoShowMysqlIntegrationTest {
         assertThat(bookingStatus(bookingId)).isEqualTo("CONFIRMED");
         assertThat(scalar("SELECT COUNT(*) FROM booking_slot WHERE booking_id = " + bookingId)).isEqualTo(2L);
         assertThat(scalar("SELECT COUNT(*) FROM violation_record WHERE booking_id = " + bookingId)).isZero();
+        assertThat(notificationCount(bookingId)).isZero();
     }
 
     @Test
@@ -118,6 +122,7 @@ class NoShowMysqlIntegrationTest {
         int credit = jdbcTemplate.queryForObject(
                 "SELECT credit_score FROM `user` WHERE id = ?", Integer.class, userId);
         assertThat(credit).isEqualTo(90);
+        assertThat(notificationCount(bookingId)).isEqualTo(1L);
     }
 
     @Test
@@ -153,6 +158,7 @@ class NoShowMysqlIntegrationTest {
             int credit = jdbcTemplate.queryForObject(
                     "SELECT credit_score FROM `user` WHERE id = ?", Integer.class, userId);
             assertThat(credit).isEqualTo(90);
+            assertThat(notificationCount(bookingId)).isEqualTo(1L);
         } finally {
             start.countDown();
             executor.shutdownNow();
@@ -162,6 +168,12 @@ class NoShowMysqlIntegrationTest {
 
     private long scalar(String sql) {
         return jdbcTemplate.queryForObject(sql, Long.class);
+    }
+
+    private long notificationCount(long bookingId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM notification WHERE biz_id=? AND type='VIOLATION'",
+                Long.class, bookingId);
     }
 
     private String bookingStatus(long bookingId) {

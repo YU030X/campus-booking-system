@@ -10,12 +10,14 @@ import com.yu030x.booking.common.api.PageResult;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
 import com.yu030x.booking.log.annotation.OperationLog;
+import com.yu030x.booking.notification.event.NotificationRequestedEvent;
 import com.yu030x.booking.violation.port.ViolationPort;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,15 +40,17 @@ public class ApprovalService {
     private final ViolationPort violationPort;
     private final ApprovalRecordMapper approvalRecordMapper;
     private final Clock clock;
+    private final ApplicationEventPublisher events;
 
     @Autowired
     public ApprovalService(BookingAdminReads bookingAdminReads,
             BookingActions bookingActions,
             ViolationPort violationPort,
             ApprovalRecordMapper approvalRecordMapper,
-            Clock jwtClock) {
+            Clock jwtClock,
+            ApplicationEventPublisher events) {
         this(bookingAdminReads, bookingActions, violationPort, approvalRecordMapper,
-                jwtClock, SHANGHAI);
+                jwtClock, SHANGHAI, events);
     }
 
     public ApprovalService(BookingAdminReads bookingAdminReads,
@@ -54,11 +58,22 @@ public class ApprovalService {
             ViolationPort violationPort,
             ApprovalRecordMapper approvalRecordMapper,
             Clock clock, ZoneId zoneId) {
+        this(bookingAdminReads, bookingActions, violationPort, approvalRecordMapper,
+                clock, zoneId, null);
+    }
+
+    public ApprovalService(BookingAdminReads bookingAdminReads,
+            BookingActions bookingActions,
+            ViolationPort violationPort,
+            ApprovalRecordMapper approvalRecordMapper,
+            Clock clock, ZoneId zoneId,
+            ApplicationEventPublisher events) {
         this.bookingAdminReads = bookingAdminReads;
         this.bookingActions = bookingActions;
         this.violationPort = violationPort;
         this.approvalRecordMapper = approvalRecordMapper;
         this.clock = clock.withZone(zoneId);
+        this.events = events;
     }
 
     public PageResult<BookingView> pendingPage(int pageNumber, int pageSize) {
@@ -90,6 +105,8 @@ public class ApprovalService {
             case WINNER -> {
                 if (isLateCancel(outcome.booking().startTime(), actionTime)) {
                     violationPort.recordLateCancel(bookingId, userId);
+                    publish(userId, "违约提醒", "您在预约开始前两小时内取消，已记录违约",
+                            "VIOLATION", bookingId);
                 }
                 yield outcome.booking();
             }
@@ -109,6 +126,13 @@ public class ApprovalService {
         return switch (outcome.result()) {
             case WINNER -> {
                 insertRecord(bookingId, approverId, action, comment);
+                if (ACTION_APPROVE.equals(action)) {
+                    publish(Long.parseLong(outcome.booking().userId()),
+                            "预约已通过", "您的预约已通过审批", "BOOKING_APPROVED", bookingId);
+                } else {
+                    publish(Long.parseLong(outcome.booking().userId()),
+                            "预约未通过", "您的预约未通过审批", "BOOKING_REJECTED", bookingId);
+                }
                 yield outcome.booking();
             }
             case ALREADY_COMPLETED -> outcome.booking();
@@ -124,5 +148,12 @@ public class ApprovalService {
         record.setAction(action);
         record.setComment(comment);
         approvalRecordMapper.insert(record);
+    }
+
+    private void publish(long userId, String title, String content, String type, long bookingId) {
+        if (events != null) {
+            events.publishEvent(new NotificationRequestedEvent(
+                    userId, title, content, type, bookingId));
+        }
     }
 }

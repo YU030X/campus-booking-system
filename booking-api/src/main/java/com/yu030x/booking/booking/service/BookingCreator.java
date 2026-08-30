@@ -5,6 +5,9 @@ import com.yu030x.booking.booking.entity.BookingEntity;
 import com.yu030x.booking.booking.mapper.BookingMapper;
 import com.yu030x.booking.booking.mapper.BookingOccupancyMapper;
 import com.yu030x.booking.booking.vo.BookingView;
+import com.yu030x.booking.cache.invalidate.AfterCommitInvalidationCoordinator;
+import com.yu030x.booking.cache.invalidate.AvailabilityInvalidationRequest;
+import com.yu030x.booking.cache.key.AvailabilityCacheKey;
 import com.yu030x.booking.common.api.BookingStatus;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
@@ -14,6 +17,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -27,21 +31,31 @@ public class BookingCreator {
     private final BookingOccupancyMapper slotMapper;
     private final BookingCreationGuard guard;
     private final Clock clock;
+    private final AfterCommitInvalidationCoordinator invalidation;
 
     @Autowired
     public BookingCreator(
             @Lazy BookingMapper bookingMapper,
             @Lazy BookingOccupancyMapper slotMapper,
-            @Lazy BookingCreationGuard guard) {
-        this(bookingMapper, slotMapper, guard, Clock.system(SHANGHAI));
+            @Lazy BookingCreationGuard guard,
+            ObjectProvider<AfterCommitInvalidationCoordinator> invalidationProvider) {
+        this(bookingMapper, slotMapper, guard, Clock.system(SHANGHAI),
+                invalidationProvider.getIfAvailable());
     }
 
     public BookingCreator(BookingMapper bookingMapper, BookingOccupancyMapper slotMapper,
             BookingCreationGuard guard, Clock clock) {
+        this(bookingMapper, slotMapper, guard, clock, null);
+    }
+
+    public BookingCreator(BookingMapper bookingMapper, BookingOccupancyMapper slotMapper,
+            BookingCreationGuard guard, Clock clock,
+            AfterCommitInvalidationCoordinator invalidation) {
         this.bookingMapper = bookingMapper;
         this.slotMapper = slotMapper;
         this.guard = guard;
         this.clock = clock;
+        this.invalidation = invalidation;
     }
 
     @Transactional
@@ -77,6 +91,11 @@ public class BookingCreator {
             slotMapper.batchInsert(interval.resourceId(), booking.getId(), slots);
         } catch (DuplicateKeyException exception) {
             throw new BizException(ErrorCode.BOOKING_ERROR, BookingMessages.SLOT_CONFLICT);
+        }
+        if (invalidation != null) {
+            invalidation.scheduleAfterCommit(new AvailabilityInvalidationRequest(
+                    AvailabilityCacheKey.of(interval.resourceId(), interval.start().toLocalDate()),
+                    "booking_create"));
         }
         return BookingView.from(booking);
     }
