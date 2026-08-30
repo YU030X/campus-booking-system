@@ -7,9 +7,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.yu030x.booking.cache.key.AvailabilityCacheKey;
+import com.yu030x.booking.cache.port.AvailabilityCachePort;
+import com.yu030x.booking.cache.port.AvailabilityReadResult;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
 import com.yu030x.booking.resource.entity.ResourceClosureEntity;
@@ -36,8 +43,61 @@ class AvailabilityServiceTest {
     private final ResourceTimeRuleMapper timeRuleMapper = mock(ResourceTimeRuleMapper.class);
     private final ResourceClosureMapper closureMapper = mock(ResourceClosureMapper.class);
     private final BookingSlotMapper bookingSlotMapper = mock(BookingSlotMapper.class);
+    private final AvailabilityCachePort cache = mock(AvailabilityCachePort.class);
+    private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
     private final AvailabilityService service = new AvailabilityService(
             resourceMapper, timeRuleMapper, closureMapper, bookingSlotMapper, CLOCK);
+
+    @Test
+    void cacheHitReturnsValidatedPayloadWithoutRuleClosureOrOccupancyReads() throws Exception {
+        LocalDate date = LocalDate.of(2026, 8, 17);
+        String key = AvailabilityCacheKey.of(7L, date);
+        AvailabilityVO expected = new AvailabilityVO("7", date, 30,
+                List.of(new AvailabilityVO.SlotVO("09:00", "09:30", true)));
+        when(resourceMapper.selectActiveById(7)).thenReturn(resource(1, 3));
+        when(cache.read(key)).thenReturn(AvailabilityReadResult.hit(
+                objectMapper.writeValueAsString(expected)));
+        AvailabilityService cachedService = cachedService();
+
+        AvailabilityVO result = cachedService.get(7, date);
+
+        assertEquals(expected, result);
+        verify(cache).read(key);
+        verify(cache, never()).write(any(), any());
+        verifyNoInteractions(timeRuleMapper, closureMapper, bookingSlotMapper);
+    }
+
+    @Test
+    void cacheFailureFallsBackToDatabaseAndWritesCalculatedResult() {
+        LocalDate date = LocalDate.of(2026, 8, 17);
+        String key = AvailabilityCacheKey.of(7L, date);
+        when(resourceMapper.selectActiveById(7)).thenReturn(resource(1, 3));
+        when(cache.read(key)).thenReturn(AvailabilityReadResult.failure());
+        when(timeRuleMapper.selectActiveByResourceId(7)).thenReturn(null);
+        when(bookingSlotMapper.find(anyLong(), any(), any())).thenReturn(null);
+
+        AvailabilityVO result = cachedService().get(7, date);
+
+        assertTrue(result.slots().isEmpty());
+        verify(cache).write(org.mockito.ArgumentMatchers.eq(key),
+                org.mockito.ArgumentMatchers.contains("\"resourceId\":\"7\""));
+    }
+
+    @Test
+    void malformedCachePayloadIsInvalidatedAndDatabaseRemainsAuthoritative() {
+        LocalDate date = LocalDate.of(2026, 8, 17);
+        String key = AvailabilityCacheKey.of(7L, date);
+        when(resourceMapper.selectActiveById(7)).thenReturn(resource(1, 3));
+        when(cache.read(key)).thenReturn(AvailabilityReadResult.hit("not-json"));
+        when(timeRuleMapper.selectActiveByResourceId(7)).thenReturn(null);
+        when(bookingSlotMapper.find(anyLong(), any(), any())).thenReturn(null);
+
+        AvailabilityVO result = cachedService().get(7, date);
+
+        assertTrue(result.slots().isEmpty());
+        verify(cache).invalidate(key);
+        verify(cache).write(org.mockito.ArgumentMatchers.eq(key), any());
+    }
 
     @Test
     void missingResourceAndUnavailableStatusesStopAtResourceGate() {
@@ -122,6 +182,11 @@ class AvailabilityServiceTest {
         resource.setStatus(status);
         resource.setMaxAdvanceDays(maxAdvanceDays);
         return resource;
+    }
+
+    private AvailabilityService cachedService() {
+        return new AvailabilityService(resourceMapper, timeRuleMapper, closureMapper,
+                bookingSlotMapper, CLOCK, cache, objectMapper);
     }
 
     private ResourceTimeRuleEntity rule(int dayOfWeek, LocalTime start, LocalTime end) {
