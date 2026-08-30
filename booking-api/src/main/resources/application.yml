@@ -28,6 +28,14 @@ mybatis-plus:
       logic-delete-value: 1
       logic-not-delete-value: 0
 booking:
+  operation-log:
+    enabled: ${BOOKING_OPERATION_LOG_ENABLED:false}
+  cache:
+    enabled: ${BOOKING_CACHE_ENABLED:false}
+  notifications:
+    enabled: ${BOOKING_NOTIFICATIONS_ENABLED:false}
+  statistics:
+    enabled: ${BOOKING_STATISTICS_ENABLED:false}
   security:
     jwt-secret: ${JWT_SECRET:}
   redis:
