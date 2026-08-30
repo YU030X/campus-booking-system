@@ -3,7 +3,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('Check', 'List', 'OperationLog', 'Cache', 'RealCache', 'Notifications', 'Statistics', 'Unit')]
+    [ValidateSet('Check', 'List', 'OperationLog', 'Cache', 'RealCache', 'Notifications', 'Statistics', 'Frontend', 'Unit')]
     [string]$Mode = 'Check'
 )
 
@@ -75,6 +75,20 @@ function Invoke-SliceTests {
     Write-Info 'OK: narrow slice finished.'
 }
 
+function Invoke-FrontendTests {
+    Write-Info 'Running Node contract tests and production frontend build:'
+    Push-Location (Join-Path $repoRoot 'booking-web')
+    try {
+        & node --test --test-reporter=spec 'tests/supporting-capabilities/**/*.test.mjs'
+        if ($LASTEXITCODE -ne 0) { throw "node --test exited with $LASTEXITCODE" }
+        & npm run build
+        if ($LASTEXITCODE -ne 0) { throw "npm run build exited with $LASTEXITCODE" }
+    } finally {
+        Pop-Location
+    }
+    Write-Info 'OK: frontend tests and build finished.'
+}
+
 switch ($Mode) {
     'Check' {
         Write-Info 'Static checks only:'
@@ -83,7 +97,7 @@ switch ($Mode) {
         Write-Info 'OK: static checks passed.'
     }
     'List' {
-        Write-Info 'Full T12 test inventory (log+cache+notification, not executed here):'
+        Write-Info 'Full T12 test inventory (backend slices + frontend contracts, not executed here):'
         foreach ($slice in $slices) {
             Write-Info ("[{0}]" -f $slice.Name)
             Get-ChildItem -LiteralPath (Join-Path $apiDir $slice.Test) -Recurse -Filter *Test.java |
@@ -93,12 +107,18 @@ switch ($Mode) {
                 Write-Info ("  {0}" -f $fqcn)
             }
         }
+        Write-Info '[frontend]'
+        Get-ChildItem -LiteralPath (Join-Path $repoRoot 'booking-web/tests/supporting-capabilities') -Recurse -Filter *.test.mjs |
+            Sort-Object FullName | ForEach-Object {
+            Write-Info ("  {0}" -f $_.FullName.Substring($repoRoot.Length + 1))
+        }
     }
     'OperationLog' { Invoke-SliceTests $slices[0].Selector }
     'Cache'        { Invoke-SliceTests $slices[1].Selector 'real-redis' }
     'RealCache'    { Invoke-SliceTests 'com.yu030x.booking.cache.redis.*RealIntegrationTest' }
     'Notifications'{ Invoke-SliceTests $slices[2].Selector }
     'Statistics'   { Invoke-SliceTests $slices[3].Selector }
+    'Frontend'     { Invoke-FrontendTests }
     'Unit' {
         $combined = ($slices | ForEach-Object { $_.Selector }) -join ','
         Invoke-SliceTests $combined 'real-redis'
