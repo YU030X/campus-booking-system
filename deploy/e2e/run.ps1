@@ -290,6 +290,8 @@ function Invoke-StudentBrowser {
         Write-Warning "BLOCKED: T08 harness entry not found: $t08run"
         return 3
     }
+    $copyDir = Join-Path $Artifacts 't08-copy'
+    New-Item -ItemType Directory -Path $copyDir -Force | Out-Null
     $savedFe = $env:T08_QA_FRONTEND
     $savedBe = $env:T08_QA_BACKEND
     $env:T08_QA_FRONTEND = [string]$profile0.frontendUrl
@@ -301,7 +303,8 @@ function Invoke-StudentBrowser {
         Select-Object -ExpandProperty FullName)
 
     try {
-        & $t08run -Action Run
+        & $t08run -Action Run 2>&1 |
+            Tee-Object -FilePath (Join-Path $copyDir 't08-command.log') | Out-Null
         $t08Exit = $LASTEXITCODE
     } finally {
         $env:T08_QA_FRONTEND = $savedFe
@@ -317,8 +320,6 @@ function Invoke-StudentBrowser {
     }
     $src = $newRunDirs[0].FullName
 
-    $copyDir = Join-Path $Artifacts 't08-copy'
-    New-Item -ItemType Directory -Path $copyDir -Force | Out-Null
     foreach ($name in @('summary.json', 'summary.meta.json', 'REPORT.md', 'network.jsonl', 'api-driver-calls.jsonl', 'console.jsonl')) {
         $f = Join-Path $src $name
         if (Test-Path -LiteralPath $f) { Copy-Item -LiteralPath $f -Destination (Join-Path $copyDir $name) -Force }
@@ -379,7 +380,8 @@ function Invoke-ApprovalBrowser {
     # Even with all conditions satisfied, this lane CANNOT be marked pass:
     # no deterministic approval browser proof exists yet (OCR-8).
     Write-Output ("Executing owner-approved executable: {0}" -f $exe)
-    & $exe @rest
+    & $exe @rest 2>&1 |
+        Tee-Object -FilePath (Join-Path $Artifacts 'approval-browser-command.log') | Out-Null
     $cmdExit = $LASTEXITCODE
     Set-Content -LiteralPath (Join-Path $Artifacts 'approval-browser-status.txt') `
         -Value ("EXECUTED_UNPROVEN exit={0}`nThis mode never reports pass until an owner-reviewed deterministic fixture and evidence chain exist (OCR-8)." -f $cmdExit) -Encoding utf8NoBOM

@@ -4,7 +4,7 @@
  *
  * Scope guard: processes ONLY the directory given as argv[2] (recursive), ONLY
  * text-ish extensions (.json .jsonl .md .txt .log .xml .properties). Files over
- * 8MB CANNOT be safely redacted by this simple reader: they are recorded as
+ * 64MB CANNOT be safely redacted by this bounded reader: they are recorded as
  * OVERSIZE_UNREDACTED and force a FAIL-CLOSED exit 2 (no silent skip-then-pass).
  * Never touches files outside the target directory - T08 originals are copied
  * first by run.ps1.
@@ -49,7 +49,7 @@ if (!targetStat.isDirectory() || targetStat.isSymbolicLink()) {
 }
 
 const TEXT_EXT = new Set(['.json', '.jsonl', '.md', '.txt', '.log', '.xml', '.properties']);
-const MAX_BYTES = 8 * 1024 * 1024;
+const MAX_BYTES = 64 * 1024 * 1024;
 
 // repl(m) receives the full match; trusted prefixes are taken from m's capture
 // group 1 via the wrapper below. Secrets are consumed by the match and never
