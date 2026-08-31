@@ -77,7 +77,7 @@ class NoShowMysqlIntegrationTest {
     @Test
     void noShowCommitsStatusViolationCreditFloorAndSlotReleaseAtomically() {
         long userId = seedUser(5);
-        long bookingId = seedConfirmedBooking(userId, LocalDateTime.now().minusHours(1));
+        long bookingId = seedConfirmedBooking(userId, nonScannableStart());
         seedSlots(bookingId, 2);
 
         boolean processed = processor.process(bookingId, userId);
@@ -96,7 +96,7 @@ class NoShowMysqlIntegrationTest {
     @Test
     void failingCreditUpdateRollsBackTheWholeItemWithoutPartialState() {
         long userId = seedUser(100);
-        long bookingId = seedConfirmedBooking(userId, LocalDateTime.now().minusHours(1));
+        long bookingId = seedConfirmedBooking(userId, nonScannableStart());
         seedSlots(bookingId, 2);
         jdbcTemplate.update("DELETE FROM `user` WHERE id = ?", userId);
 
@@ -112,7 +112,7 @@ class NoShowMysqlIntegrationTest {
     @Test
     void repeatedProcessingIsIdempotentAndNeverDoubleDeducts() {
         long userId = seedUser(100);
-        long bookingId = seedConfirmedBooking(userId, LocalDateTime.now().minusHours(1));
+        long bookingId = seedConfirmedBooking(userId, nonScannableStart());
         seedSlots(bookingId, 1);
 
         assertThat(processor.process(bookingId, userId)).isTrue();
@@ -128,7 +128,7 @@ class NoShowMysqlIntegrationTest {
     @Test
     void concurrentProcessingAllowsExactlyOneWinnerAndOneDeduction() throws Exception {
         long userId = seedUser(100);
-        long bookingId = seedConfirmedBooking(userId, LocalDateTime.now().minusHours(1));
+        long bookingId = seedConfirmedBooking(userId, nonScannableStart());
         seedSlots(bookingId, 1);
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
@@ -168,6 +168,15 @@ class NoShowMysqlIntegrationTest {
 
     private long scalar(String sql) {
         return jdbcTemplate.queryForObject(sql, Long.class);
+    }
+
+    /**
+     * The processor receives rows already selected by the scan. Keep its direct
+     * integration fixtures outside the live scheduler's eligibility window so
+     * the scheduler cannot win the same conditional transition first.
+     */
+    private LocalDateTime nonScannableStart() {
+        return LocalDateTime.now().plusDays(1);
     }
 
     private long notificationCount(long bookingId) {
