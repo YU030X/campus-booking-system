@@ -1,9 +1,9 @@
-# T13 Deployment Slice 1 - Static Plan Artifacts
+# T13 Deployment and Verification Assets
 
-Scope: T13 `deploy/**` files only. Nothing in this directory has been built,
-run, or validated. Every command below is **documented, not executed**; actual
-execution belongs to the local verification gates (tasks.md 7.x) and stays
-forbidden until the ownership/merge gates (tasks 1.2) pass.
+Scope: T13 `deploy/**` files only. Static checks, local runner checks, backend/
+frontend acceptance, Compose config validation, and plans are recorded as they
+run; Docker runtime, recovery, load, browser, and external gates retain explicit
+NOT RUN/BLOCKED states until their own evidence exists.
 
 ## Files
 
@@ -12,7 +12,7 @@ forbidden until the ownership/merge gates (tasks 1.2) pass.
 | `api/Dockerfile` | JDK17 multi-stage Maven build → non-root JRE runtime, jar-only copy, port 8080 | authored, unverified |
 | `web/Dockerfile` | pinned Node builder (`npm ci`, fail-closed on missing lock) + Vite dist served by pinned `nginx-unprivileged` (non-root, 8080) | authored, unverified |
 | `nginx/default.conf` | 8080 SPA fallback, `/api` → `http://api:8080` prefix-preserve proxy (controllers own `/api/v1/...` mappings), security headers, body limit/timeouts, upstream header hiding | authored, CSP not browser-validated |
-| `compose.yml` | edge/api/mysql8/redis topology, internal backend network, named volumes, healthchecks, restart/logging/mem/cpu bounds, `${VAR:?}` secret gating | authored, `compose config` not run |
+| `compose.yml` | edge/api/mysql8/redis topology, internal backend network, named volumes, healthchecks, restart/logging/mem/cpu bounds, `${VAR:?}` secret gating | authored; config gate tracked separately from daemon runtime |
 | `.env.example` | non-secret placeholders only; secrets generated locally into git-ignored `.env` | template |
 | `.gitignore` | keeps a local `deploy/.env` out of Git | active |
 
@@ -64,7 +64,7 @@ operation: operator-provided cert/key mounts plus a renewal command recorded in
   backend network (tasks.md 4.2; deployment-runtime spec private-topology MUST).
 - API is `expose`-only on the compose networks; never published directly.
 
-## Commands (documented, NOT run)
+## Commands
 
 ```bash
 cd deploy && docker compose --env-file .env config     # validate interpolation/topology
@@ -79,9 +79,9 @@ docker compose --env-file .env down                    # volumes preserved
 | `scripts/empty-migration-check.ps1` | V001–V005 on two throwaway MySQL8 containers; 12 tables/InnoDB/utf8mb4/seed-free + every DDL-declared index (unique+plain) exact-matched + SHA256 schema identity | authored, never run |
 | `scripts/backup-restore-check.ps1` | consistent mysqldump → isolated random restore DB → exact-12 + full normalized definition comparison, checksum/count/aggregate evidence, RPO/RTO fields | authored, never run |
 | `scripts/restart-persistence-check.ps1` | plan-only default (no secret needed); `-Execute` restarts/recreates with volumes preserved; requires all three containers healthy and proves persistence | authored, never run |
-| `scripts/redis-failure-check.ps1` | T07 fail-closed (409/43000/SYSTEM_BUSY, zero mutation); T12 fallback is BLOCKED_OWNER_WIRING by default (exit 3) until owner wiring lands (`-T12FallbackWired` attestation) | authored, never run |
+| `scripts/redis-failure-check.ps1` | T07 fail-closed (409/43000/SYSTEM_BUSY, zero mutation) plus merged T12 availability MySQL fallback, latency, and Redis recovery | authored, runtime not run |
 | `runbooks/recovery.md` | lanes, rollback doctrine, RPO/RTO operator fields, stop conditions | planning doc |
-| `owner-change-requests.md` | T12 cache-port wiring blocker + external/digest/merge/fixture/concurrency-history blockers with file:line evidence | living doc |
+| `owner-change-requests.md` | resolved historical owner requests plus current external/digest/fixture/concurrency-history blockers | living doc |
 | `jmeter/booking-concurrency.jmx` | 5.6.3 plan; 100-thread same-slot group + distinct granularity group, property-gated, no assertions (offline classification) | authored, never run |
 | `jmeter/rounds.example.json` | three-round template; placeholders only; baseline double-gated | authored, never run |
 | `jmeter/run.ps1` | plan default; one round per execution, deep-validated loopback BaseUrl, same-slot token via temp secret props (never argv) with verified cleanup, distinct via validated 100-row runtime CSV path; pre/post row evidence via container auth | authored, never run |
@@ -92,8 +92,8 @@ docker compose --env-file .env down                    # volumes preserved
 | `e2e/redact-artifacts.mjs` | offline artifact redactor; manifest path/rule/count only; residual-scan exit 2 | authored, never run |
 | `e2e/inventory.md` | requirement → real `file:class` coverage map + browser cases + honest gaps | authored |
 | `e2e/README.md` | runner approval rationale, flow, redaction, blockers | planning doc |
-| `evidence/preconditions.md` | baseline/worktree record, integration merge evidence (partial gate), T04–T12 owner index, T13 ownership map + stop-and-request template, runner selection | living evidence doc |
-| `evidence/verification-matrix.md` | local/external verification gates, exact commands, evidence paths, pass criteria, and current blockers | DRAFT, nothing run |
+| `evidence/preconditions.md` | baseline/worktree record, integrated owner/spec-sync evidence, T04–T12 owner index, T13 ownership map + stop-and-request template, runner selection | living evidence doc |
+| `evidence/verification-matrix.md` | local/external verification gates, exact commands, evidence paths, pass criteria, and current blockers | DRAFT, local evidence in progress |
 | `demo/profile.example.json` | ephemeral demo fixture profile template (loopback, env NAMES only, publicDenied) | authored, never run |
 | `demo/run.ps1` | Setup/StudentFlow/Teardown/All; RNG passwords in verified temp secret file; scope-limited teardown; EPHEMERAL-SETUP labeling | authored, never run |
 | `demo/evidence-index.template.md` | requirement→artifact mapping; all NOT RUN/DRAFT placeholders | template |
@@ -102,14 +102,16 @@ docker compose --env-file .env down                    # volumes preserved
 
 All scripts require PowerShell 7, are parameterized, refuse non-local
 endpoints, redact credentials in artifacts, and clean up throwaway containers
-in `finally`. Nothing in this table has been executed.
+in `finally`. A script is accepted only when its own recorded run exits zero.
 
 ## Open items / honest gaps
 
-- T12 owner blocker (OCR-1, `owner-change-requests.md`): availability reads do
-  not consume `AvailabilityCachePort`; Redis-fallback lane cannot fully pass.
-- No build, image, migration, health, or browser evidence exists yet for this
-  slice; `mvn verify`/E2E/scan gates untouched so far.
+- T12 OCR-1/OCR-9 are resolved; a fresh T13 Compose outage run is still needed
+  for the deployment-specific Redis-failure lane.
+- Docker daemon is unavailable in the current environment, so image, migration,
+  health, restart, recovery, and Compose outage runtime evidence remains blocked.
+- JMeter 5.6.3 and the historical/fixture artifacts for all three rounds are absent;
+  ApprovalBrowser still lacks its deterministic owner-approved fixture/command.
 - Tag→digest resolution pending (above); digest-pinned promotion untested.
 - API healthcheck inside its image container is TCP-connect liveness only
   (Temurin JRE ships no curl/wget); actuator HTTP `/actuator/health` probe

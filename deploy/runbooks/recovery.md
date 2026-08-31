@@ -15,7 +15,7 @@ require explicit user authorization (tasks 8.1–8.2) before any run.
 | Empty migration | `scripts/empty-migration-check.ps1` | V001–V005 on two throwaway MySQL8 containers produce identical 12-table InnoDB/utf8mb4 seed-free schemas with every DDL-declared key — PRIMARY (as index `PRIMARY`, non-unique), UNIQUE and plain KEY — matched exactly | authored, not run |
 | Backup / restore | `scripts/backup-restore-check.ps1` | consistent dump (`--single-transaction`) restores into an isolated random DB with exact 12-table contract and full normalized definitions matching | authored, not run |
 | Restart persistence | `scripts/restart-persistence-check.ps1` | MySQL volume data + schema survive `restart` or stop+recreate without volume loss; plan mode needs no secret | authored, not run |
-| Redis failure | `scripts/redis-failure-check.ps1` | T07 fail-closed proof; T12 fallback currently UNPROVABLE (`BLOCKED_OWNER_WIRING`, see owner-change-requests.md OCR-1) — lane exits 3 on default unless owner passes `-T12FallbackWired` after wiring lands | authored, not run |
+| Redis failure | `scripts/redis-failure-check.ps1` | T07 fail-closed plus T12 live MySQL fallback, zero mutation, latency, and Redis recovery | authored, not run; Docker stack/token required |
 
 Common rules: loopback/private endpoints only; run-id scoped containers,
 volumes and artifacts; evidence written to `deploy/artifacts/<run-id>/`
@@ -81,7 +81,7 @@ back to MySQL (`RedisProperties.java:14`,
 | Consumer | During outage | Expected | Proof point |
 |---|---|---|---|
 | T07 booking lock | `compose stop redis`, POST `/api/v1/bookings` | HTTP 409 + code 43000 + SYSTEM_BUSY message/category, zero booking/slot mutation | script asserts + snapshots counts around call |
-| T12 availability | same outage window, GET `/api/v1/resources/{id}/available-slots` | **UNPROVABLE TODAY**: AvailabilityService.java:29-33 has no cache-port consumer (OCR-1). Default run records `BLOCKED_OWNER_WIRING` and exits 3 even when T07 passes. With owner attestation `-T12FallbackWired`, the GET becomes a candidate proof ONLY under strict assertions: HTTP 200 + envelope code 0 + `data` present + zero DB mutation around the call (else lane fails with exit 2). | script result fields |
+| T12 availability | same outage window, GET `/api/v1/resources/{id}/available-slots` | Merged cache-backed read MUST fall back to MySQL; script requires HTTP 200 + envelope code 0 + `data` present + zero DB mutation and records latency (else exit 2). | script result fields |
 
 Missing student token ⇒ BLOCKED exit 3 before anything runs (the only blocked
 precondition besides a stopped stack; DB access authenticates with the
@@ -90,8 +90,6 @@ container-created app account).
 ```powershell
 $env:T13_STUDENT_TOKEN = '<runtime injected>'
 pwsh deploy/scripts/redis-failure-check.ps1 -BaseUrl http://127.0.0.1
-# after OCR-1 is fixed by the T12 owner and merged:
-pwsh deploy/scripts/redis-failure-check.ps1 -BaseUrl http://127.0.0.1 -T12FallbackWired
 ```
 
 Missing `T13_STUDENT_TOKEN` ⇒ BLOCKED exit 3 (nothing touched) — DB access

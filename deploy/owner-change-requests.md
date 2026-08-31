@@ -4,10 +4,9 @@ Standing rule: T13 never edits business/frontend/common source, Maven/npm
 manifests, or `sql/` migrations. Every defect below is a REQUEST to the owning
 task; T13 only records evidence and blocks its own gates accordingly.
 
-## OCR-1 (T12): availability read path does not consume the cache port
+## OCR-1 (T12): availability cache read-path wiring
 
-Status: OPEN - blocks lane D full pass, tasks 5.4, parts of E2E Redis-failure
-coverage, and any "cache is active" claim in deployment evidence.
+Status: RESOLVED IN OWNER BRANCH — live T13 outage execution remains not run.
 
 Evidence:
 
@@ -16,19 +15,15 @@ Evidence:
     `@ConditionalOnProperty(name = "booking.cache.enabled", havingValue = "true", matchIfMissing = false)`
   * same file, line 23: `availabilityCachePort(ObjectProvider<RedissonClient>)`
     bean defined; line 29 shows a second bean injecting `AvailabilityCachePort`.
-* But the read path bypasses it entirely:
-  * `booking-api/src/main/java/com/yu030x/booking/availability/AvailabilityService.java:29-33` —
-    constructor injects `ResourceMapper`, `ResourceTimeRuleMapper`,
-    `ResourceClosureMapper`, `BookingSlotMapper`, `Clock`; there is no
-    `AvailabilityCachePort` field/consumer anywhere in the class.
-* Therefore with Redis stopped, an availability GET exercises plain mappers;
-  observing success proves nothing about MySQL fallback THROUGH the cache layer,
-  and `BOOKING_CACHE_ENABLED=true` in compose merely instantiates beans nobody calls.
-
-Requested owner action (T12): route availability slot reads through
-`AvailabilityCachePort` with documented MySQL fallback semantics, preserving
-frozen API responses. After merge + spec sync, T13 re-runs lane D WITH
-`-T12FallbackWired`.
+* The merged read path now consumes it:
+  * `AvailabilityService.java` injects `ObjectProvider<AvailabilityCachePort>`,
+    calls `cache.read`, falls back to the existing MySQL calculation on MISS or
+    FAILURE, and best-effort writes the result.
+  * T12 `HANDOFF.md` records narrow cache 29/29 and real MySQL/Redis 5/5,
+    including live fallback and unchanged T07 fail-closed behavior.
+* `redis-failure-check.ps1` now always performs the strict live T12 observation;
+  no owner-attestation bypass remains. A Compose outage run is still required
+  before task 5.4 can pass.
 
 ## OCR-2 (external/user): public acceptance inputs missing
 
@@ -36,21 +31,15 @@ Blocks tasks 8.1–8.3 by design. Missing: authorized target host/domain, DNS
 ownership, TLS certificate/renewal mechanism, credentials. Until provided,
 local/container-only evidence stands and public claims stay forbidden.
 
-## OCR-3 (merge/sync gate): branch-local integration exists, main + spec sync do not
+## OCR-3 (merge/sync gate): integrated T13 branch and main specs
 
-Current status on the T13 branch: merge commits integrate main and the T09/T08/
-T11/T12 lanes — `1753903` (main), `652513b`, `240a7b2`, `974a213`, `13c51e0` —
-so the worktree is NOT "unmerged planning artifacts" anymore. The gate is
-nonetheless only PARTIAL because:
-
-1. these commits are not merged into `main` (branch-local integration),
-2. delta specs are not synced into main specs (openspec sync step pending),
-3. full P0 per-owner merge/rebase evidence is not collected/indexed.
-
-Owner(s): each lane owner for their merge/rebase proof; T13 owns collecting and
-indexing the evidence but cannot self-certify `main` state or spec sync.
-Consequence: execution-oriented local gates may only run as planning evidence;
-the change stays Draft until 1–3 are closed.
+Status: RESOLVED FOR THE T13 INTEGRATION WORKTREE. Merge commit `19649b5`
+integrates the current accepted T12 chain (including T07/T09/T10/T11 owner
+handoffs) on top of the earlier main/T08 merges. Commit `070155f` synchronizes
+all discovered T04–T12 delta capability paths into main specs; strict main-spec
+validation passed 21/21. The change still remains Draft for unexecuted runtime,
+fixture/history, digest, and external gates; ordinary pre-PR branch-local state
+is not misclassified as a missing integration proof.
 
 ## OCR-4 (build hygiene): image tag→digest pairs unresolved
 
@@ -111,9 +100,9 @@ declared by that round's own image configuration; T13 does not guess the
 current implementation. The corresponding historical compose/image artifact is
 not present or attested — round stays blocked as configured.
 
-## OCR-9 (T12): AvailabilityCacheKey does not compile on JDK 17
+## OCR-9 (T12): historical AvailabilityCacheKey JDK 17 compile failure
 
-Status: OPEN - blocks `mvn verify` and any T12 cache implementation evidence.
+Status: RESOLVED; historical failing evidence retained as superseded.
 
 Evidence from the authorized local run on 2026-08-28:
 
@@ -121,14 +110,11 @@ Evidence from the authorized local run on 2026-08-28:
   `JAVA_HOME=C:\Users\yuu\scoop\apps\temurin17-jdk\current`.
 * Result: Maven compiler failed at
   `booking-api/src/main/java/com/yu030x/booking/cache/key/AvailabilityCacheKey.java:74`.
-* Source currently contains:
-  `catch (NumberFormatException beyondLongRange | DateTimeParseException notACanonicalDay)`.
-  Java multi-catch syntax permits one variable after the complete alternative
-  list; two separately named alternatives are a syntax error.
+* The owner corrected the multi-catch to one variable after the alternatives.
+* Final T12 real-environment `mvn verify` passed 387/387 with zero failures,
+  errors, or skips on JDK 17; the earlier log remains a valid historical failure,
+  not a current blocker.
 * Exit code: `1`. Redacted raw log: `deploy/artifacts/local-backend-verify/mvn-verify-offline.log`.
 
-Requested owner action (T12): correct the multi-catch syntax without weakening
-strict cache-key validation, run the relevant tests and `mvn verify` on JDK 17,
-then provide the commit and test evidence. T13 MUST NOT edit this business file
-or claim backend verification until the owner fix is merged and the command
-exits zero.
+No owner action remains for OCR-9. T13 must still preserve its own fresh backend
+gate output before checking task 7.1.

@@ -42,7 +42,7 @@
       * All = Setup -> StudentFlow -> Teardown; any failure is non-zero and
         finally still attempts Teardown (if a fixture map exists) and secret
         deletion. Standalone StudentFlow needs no fixture password; standalone
-        Teardown locates the newest demo fixture-map.json.
+        Teardown requires an explicit fixture-map.json path.
     Exit codes: 0 pass | 1 environment/secret-cleanup | 2 refused | 3 blocked.
 #>
 [CmdletBinding()]
@@ -76,6 +76,7 @@ $resourceName = "T13 DEMO $RunId approval room"
 
 if (-not $ProfilePath)  { $ProfilePath  = (Join-Path $PSScriptRoot 'profile.example.json') }
 if (-not $ArtifactRoot) { $ArtifactRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\artifacts')).Path }
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 New-Item -ItemType Directory -Path $ArtifactRoot -Force | Out-Null
 
 $localHosts = @('127.0.0.1', 'localhost', '::1')
@@ -162,12 +163,26 @@ if (-not $Execute) {
 }
 
 # ---- Execute preconditions ------------------------------------------------------
-foreach ($p in @($composeFile, $seedPath, $t08Dir, $e2eRun)) {
-    if (-not $p -or -not (Test-Path -LiteralPath $p)) {
-        Write-Warning "BLOCKED: demo profile path placeholder not expanded: '$p'"
+function Assert-RepositoryPath {
+    param([string]$Candidate, [string]$Expected, [string]$Label, [bool]$Leaf)
+    if (-not $Candidate -or -not (Test-Path -LiteralPath $Candidate)) {
+        Write-Warning "BLOCKED: demo profile path placeholder not expanded for $Label."
         exit 3
     }
+    $resolved = (Resolve-Path -LiteralPath $Candidate).Path
+    $expectedResolved = (Resolve-Path -LiteralPath $Expected).Path
+    if (-not [string]::Equals($resolved, $expectedResolved, [StringComparison]::OrdinalIgnoreCase) -or
+        ($Leaf -and -not (Test-Path -LiteralPath $resolved -PathType Leaf)) -or
+        (-not $Leaf -and -not (Test-Path -LiteralPath $resolved -PathType Container))) {
+        Write-Warning "REFUSED: $Label must resolve to the repository-owned path."
+        exit 2
+    }
+    return $resolved
 }
+$composeFile = Assert-RepositoryPath $composeFile (Join-Path $repoRoot 'deploy\compose.yml') 'composeFile' $true
+$seedPath = Assert-RepositoryPath $seedPath (Join-Path $repoRoot 'scripts\tests\t08\seed.sql') 't08SeedPath' $true
+$t08Dir = Assert-RepositoryPath $t08Dir (Join-Path $repoRoot 'scripts\tests\t08') 't08HarnessDir' $false
+$e2eRun = Assert-RepositoryPath $e2eRun (Join-Path $repoRoot 'deploy\e2e\run.ps1') 'e2eRunPath' $true
 $Artifacts = Join-Path $ArtifactRoot "demo-$Mode-$RunId"
 New-Item -ItemType Directory -Path $Artifacts -Force | Out-Null
 
@@ -400,6 +415,9 @@ function Invoke-DemoStudentFlow {
         '$comment' = "attested by T13 demo Setup run $RunId (ephemeral fixture)"
     }
     Set-Content -LiteralPath $tmpProfile -Value ($childProfile | ConvertTo-Json -Depth 5) -Encoding utf8NoBOM
+    $existingE2eDirs = @{}
+    Get-ChildItem -LiteralPath $ArtifactRoot -Directory -Filter 'e2e-StudentBrowser-*' -ErrorAction SilentlyContinue |
+        ForEach-Object { $existingE2eDirs[$_.FullName] = $true }
     try {
         & $e2eRun -Mode StudentBrowser -Execute -ProfilePath $tmpProfile
         $e2eExit = $LASTEXITCODE
@@ -412,7 +430,8 @@ function Invoke-DemoStudentFlow {
     # Map produced evidence into the demo evidence index (no pass claims for
     # approval; ApprovalBrowser was never invoked).
     $e2eDirs = @(Get-ChildItem -LiteralPath $ArtifactRoot -Directory -Filter 'e2e-StudentBrowser-*' -ErrorAction SilentlyContinue |
-        Sort-Object Name -Descending)
+        Where-Object { -not $existingE2eDirs.ContainsKey($_.FullName) } |
+        Sort-Object LastWriteTimeUtc -Descending)
     $idx = Join-Path $Artifacts 'evidence-index.md'
     $lines = @(
         "## StudentFlow evidence (run $RunId)",
@@ -433,6 +452,7 @@ function Invoke-DemoStudentFlow {
     Add-Content -LiteralPath $idx -Value (($lines -join "`r`n") + "`r`n") -Encoding utf8NoBOM
 
     if ($e2eExit -ne 0) { Write-Warning ("StudentFlow (e2e) exited {0}." -f $e2eExit); return 1 }
+    if ($e2eDirs.Count -eq 0) { Write-Warning 'StudentFlow returned zero but produced no new evidence directory.'; return 1 }
     return 0
 }
 
@@ -556,15 +576,6 @@ try {
             $rc = Invoke-DemoStudentFlow
             if ($rc -ne 0) { $overall = $rc }
         } elseif ($m -eq 'Teardown') {
-            if (-not $MapPath) {
-                # Standalone Teardown: locate the newest demo fixture map.
-                $latest = Get-ChildItem -LiteralPath $ArtifactRoot -Directory -Filter 'demo-Setup-*' -ErrorAction SilentlyContinue |
-                    Sort-Object Name -Descending | Select-Object -First 1
-                if ($latest) {
-                    $candidate = Join-Path $latest.FullName 'fixture-map.json'
-                    if (Test-Path -LiteralPath $candidate) { $MapPath = $candidate }
-                }
-            }
             $rc = Invoke-DemoTeardown
             if ($rc -ne 0) { $overall = $rc }
         }

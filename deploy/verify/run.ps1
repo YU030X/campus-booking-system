@@ -132,14 +132,76 @@ if ($Gate -eq 'static') {
     exit 2
 }
 
+function Invoke-NativeGate {
+    New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+    $logPath = Join-Path $artifactDir 'command.log'
+    $exitCode = 1
+    try {
+        switch ($Gate) {
+            'compose-config' {
+                $composeFile = Join-Path $repoRoot 'deploy\compose.yml'
+                $envFile = Join-Path $repoRoot 'deploy\.env'
+                $composeArgs = @('compose')
+                if (Test-Path -LiteralPath $envFile -PathType Leaf) {
+                    $composeArgs += @('--env-file', $envFile)
+                } else {
+                    $missing = @('MYSQL_ROOT_PASSWORD', 'DB_USERNAME', 'DB_PASSWORD', 'JWT_SECRET') |
+                        Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) }
+                    if ($missing.Count -gt 0) {
+                        Write-Result -ExitCode 3 -Status 'BLOCKED' -Detail ('deploy/.env is absent and required runtime environment names are missing: ' + ($missing -join ', '))
+                        return 3
+                    }
+                }
+                $composeArgs += @('-f', $composeFile, 'config', '--quiet')
+                & docker @composeArgs *> $logPath
+                $exitCode = $LASTEXITCODE
+                if ($exitCode -eq 0) {
+                    # Safe evidence keeps ${...} placeholders instead of expanded secrets.
+                    & docker compose -f $composeFile config --no-interpolate 2>&1 |
+                        Tee-Object -FilePath $logPath -Append | Out-Null
+                    $exitCode = $LASTEXITCODE
+                }
+            }
+            backend {
+                Push-Location (Join-Path $repoRoot 'booking-api')
+                try {
+                    & mvn verify 2>&1 | Tee-Object -FilePath $logPath | Out-Null
+                    $exitCode = $LASTEXITCODE
+                } finally { Pop-Location }
+            }
+            frontend {
+                Push-Location (Join-Path $repoRoot 'booking-web')
+                try {
+                    & npm ci 2>&1 | Tee-Object -FilePath $logPath | Out-Null
+                    $exitCode = $LASTEXITCODE
+                    if ($exitCode -eq 0) {
+                        & npm run build 2>&1 | Tee-Object -FilePath $logPath -Append | Out-Null
+                        $exitCode = $LASTEXITCODE
+                    }
+                } finally { Pop-Location }
+            }
+        }
+    } catch {
+        $_ | Out-String | Set-Content -LiteralPath $logPath -Encoding utf8NoBOM
+        $exitCode = 1
+    }
+    if ($exitCode -eq 0) {
+        Write-Result -ExitCode 0 -Status 'PASS' -Detail 'Native gate command exited zero; inspect command.log for the exact executed evidence.'
+        return 0
+    }
+    Write-Result -ExitCode $exitCode -Status 'FAIL' -Detail 'Native gate command failed; inspect command.log.'
+    return $exitCode
+}
+
+if ($Gate -in @('compose-config', 'backend', 'frontend')) {
+    exit (Invoke-NativeGate)
+}
+
 # Runtime dispatch is intentionally explicit. No public host/domain/TLS gate is
 # represented, and each delegated script owns its own loopback/credential gates.
 $scriptPath = $null
 $arguments = @()
 switch ($Gate) {
-    'compose-config' { $scriptPath = $null; $arguments = @('compose-config') }
-    backend          { $scriptPath = $null; $arguments = @('backend') }
-    frontend         { $scriptPath = $null; $arguments = @('frontend') }
     'empty-migration' { $scriptPath = Join-Path $repoRoot 'deploy\scripts\empty-migration-check.ps1' }
     'backup-restore' { $scriptPath = Join-Path $repoRoot 'deploy\scripts\backup-restore-check.ps1' }
     'restart-persistence' { $scriptPath = Join-Path $repoRoot 'deploy\scripts\restart-persistence-check.ps1'; $arguments = @('-Execute') }

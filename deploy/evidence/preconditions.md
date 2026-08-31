@@ -13,7 +13,7 @@ Status marker legend: ✅ evidence complete · 🟡 partial (gate NOT satisfied)
   `D:\Projects\project1_campus\target\worktrees\verify-and-deploy-system`
 * Branch: `codex/verify-and-deploy-system`
 
-## 2. Integration merge evidence (task 1.2) 🟡 partial
+## 2. Integration merge and spec-sync evidence (task 1.2) ✅
 
 Exact merge commits present on this branch (recorded, verified by `git log`
 during the slice-5 planning session):
@@ -24,17 +24,17 @@ during the slice-5 planning session):
 | `652513b` | T09 (carrying T07 booking-lock + T10 work) |
 | `240a7b2` | T08 |
 | `974a213` | T11 |
-| `13c51e0` | T12 |
+| `13c51e0` | earlier T12 snapshot |
+| `19649b5` | current accepted T12/T07/T09/T10/T11 chain |
+| `070155f` | synchronized discovered T04–T12 delta capabilities into main specs |
 
-Why the gate is still NOT satisfied (per tasks.md:4):
-
-1. These commits are branch-local: **not merged into `main`**.
-2. **Delta specs are not synced** into main specs (openspec sync pending).
-3. Full **owner rebase/merge proof** per task has not been collected/indexed.
-
-Consequence: the change stays **Draft**; execution-oriented gates may only
-produce planning evidence (see `deploy/e2e/`, `deploy/jmeter/`, `deploy/demo/`
-"never executed" banners).
+`git merge-base --is-ancestor main HEAD` succeeds, and the dedicated T13 branch
+contains the accepted owner commits plus current T12 merge. Main-spec sync
+created/updated every delta path reported by `openspec status`; strict main-spec
+validation passed 21/21. T12's ordered statistics→notifications→cache cut matrix
+passed three complete 82/82 booking/T07 runs. The change remains Draft for
+runtime, fixture/history, digest, and external gates—not for missing dependency
+integration or spec sync.
 
 ## 3. T04–T12 owner/path index (task 1.2 input)
 
@@ -49,11 +49,11 @@ attested by merge evidence it is listed by branch name only.
 | Backend data security extension | `codex/extend-backend-data-security-foundation` (archive `2026-08-13-extend-backend-data-security-foundation*`) | merged history present |
 | Resource catalog / foundation | `codex/add-resource-*`, archive `2026-08-13-add-resource-*`, `2026-08-13-initialize-*` | merged history present |
 | Redis concurrency foundation (T-sibling) | `codex/add-redis-concurrency-foundation` | merged into main history |
-| T08 resource catalog lane | integrated by `240a7b2` | branch-local (see §2) |
-| T09 lane (incl. T07 booking-lock + T10) | integrated by `652513b` | branch-local (see §2) |
-| T11 lane | integrated by `974a213` | branch-local (see §2) |
-| T12 optional cuts: statistics → notifications → cache | integrated by `13c51e0`; cuts remain OPTIONAL and are not P1 prerequisites | branch-local (see §2) |
-| Booking core / approval / check-in / availability / user-credit / supporting / web ×4 | `codex/add-concurrent-booking-core`, `codex/add-booking-approval-cancellation`, `codex/add-checkin-no-show-violation`, `codex/add-resource-availability`, `codex/add-user-credit-port`, `codex/add-supporting-capabilities`, `codex/add-web-auth-shell`, `codex/add-web-resource-management`, `codex/add-web-student-booking`, `codex/add-web-admin-operations` | planning artifacts present; NOT merged to main |
+| T08 student frontend lane | integrated by `240a7b2` | merged into T13 integration branch |
+| T09 lane (incl. T07 booking-lock + T10) | integrated by `652513b` and current T12 owner chain | merged into T13 integration branch |
+| T11 lane | integrated by `974a213` and current T12 owner chain | merged into T13 integration branch |
+| T12 optional cuts: statistics → notifications → cache | current chain integrated by `19649b5`; cuts remain OPTIONAL and are not P1 prerequisites | merged; CutMatrix 3×82 passed |
+| Booking core / approval / check-in / availability / user-credit / supporting / web ×4 | accepted owner branches indexed by the T12 handoff and merge history | implementation integrated; discovered delta specs synced by `070155f` |
 
 ## 4. T13 ownership map (task 1.3) ✅
 
@@ -85,10 +85,11 @@ request      : <what the owner should change; T13 makes NO edit itself>
 
 Live requests are filed in `deploy/owner-change-requests.md` (OCR-1 … OCR-8).
 
-## 6. Runner selection (task 1.4) 🟡 partial
+## 6. Runner selection (task 1.4) ✅
 
 Selected and documented: repo-internal `scripts/tests/t08/run.ps1` (`-Action
 Run`) + Chrome `--headless=new` over raw CDP — the only in-repo browser
-harness (rationale: `deploy/e2e/README.md`). The apply-environment
-AVAILABILITY check (Chrome/node actually present) has NOT been executed, so
-task 1.4 remains unchecked.
+harness (rationale: `deploy/e2e/README.md`). The recorded availability command
+exited zero with `CHECK_OK` in
+`deploy/artifacts/local-runner-check/runner-check.log`; this proves runner
+availability only, not a browser flow.

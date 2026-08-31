@@ -31,9 +31,8 @@
   using EXACT username/purpose lists and the numeric resource id — no LIKE
   wildcards, no database/volume drops, no foreign rows. A pre/post total-count
   record plus leftover checks land in `teardown-evidence.txt`.
-* Standalone Teardown requires the fixture map (`-MapPath` or the newest
-  `demo-Setup-*` artifact); without it the mode is BLOCKED — scope is never
-  guessed.
+* Standalone Teardown requires an explicit fixture map via `-MapPath`; without
+  it the mode is BLOCKED. The script never guesses the newest fixture scope.
 
 ## Generated passwords
 
@@ -51,7 +50,8 @@
 * `StudentFlow` delegates to `deploy/e2e/run.ps1 -Mode StudentBrowser` only when
   the supplied profile has owner-reviewed `fixtureAttested: true`; the temporary
   child profile inherits that attestation and cannot self-attest. Resulting
-  evidence is redacted text + an unreviewed-screenshot
+  evidence is accepted only from a directory created by that exact invocation,
+  then retained as redacted text + an unreviewed-screenshot
   directory, mapped into `evidence-index.md`.
 * The APPROVAL browser path is **blocked** (OCR-8): no deterministic approval
   fixture/command exists, ApprovalBrowser is never invoked here, and nothing

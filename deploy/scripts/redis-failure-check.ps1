@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     T13 lane D: Redis-outage behavior proof - T07 booking lock MUST fail closed;
-    T12 availability fallback is currently UNPROVABLE (owner wiring blocker).
+    T12 availability Cache Aside MUST fall back to MySQL.
 .DESCRIPTION
     STATIC PLAN - never executed yet (tasks.md 5.4 stays unchecked until real run).
 
@@ -11,19 +11,10 @@
         SYSTEM_BUSY message/category; no DB-only fallback; zero mutation of
         booking/booking_slot rows (counts compared before vs after).
         (BookingLockCoordinator.java:29-65, BookingMessages.java:5)
-      * T12: AvailabilityService does NOT consume AvailabilityCachePort today
-        (AvailabilityService.java:29-33 injects mappers only; the port bean is
-        defined in AvailabilityCacheConfiguration.java:19-23 but has no read-path
-        consumer). Therefore the MySQL-fallback behavior CANNOT be proven by this
-        lane: by default the result records t12ProofStatus=BLOCKED_OWNER_WIRING
-        and the lane FAILS (exit 3) EVEN IF T07 passes. See
-        deploy/owner-change-requests.md.
-.PARAMETER T12FallbackWired
-    Owner attestation switch. Only after the T12 owner wires the availability
-    read path through AvailabilityCachePort may this be passed; then the GET
-    availability call becomes a candidate PROOF observation whose response,
-    latency and consistency note are recorded and count toward the verdict.
-    Without it, a plain successful GET proves nothing about fallback.
+      * T12: the merged AvailabilityService consumes AvailabilityCachePort. The
+        outage GET MUST return HTTP 200/code 0/data, preserve DB state, and record
+        latency. Passing still requires this live observation; merged wiring alone
+        is not acceptance evidence.
     Safety contract:
       * BaseUrl strictly local: only 127.0.0.1 / localhost / ::1 accepted;
         anything else exits refused WITHOUT any request.
@@ -32,8 +23,7 @@
       * DB access authenticates with the CONTAINER's own MYSQL_USER/MYSQL_PASSWORD
         (the compose-created app account) - host-side DB_* env vars are NOT used.
       * finally guarantees redis restart attempt even on failure paths.
-    Exit codes: 0 pass | 1 environment | 2 assertion/refusal | 3 blocked or
-    unprovable-by-owner-wiring.
+    Exit codes: 0 pass | 1 environment | 2 assertion/refusal | 3 blocked.
 #>
 [CmdletBinding()]
 param(
@@ -46,8 +36,7 @@ param(
     [string]$Purpose = 'T13 redis-failure probe',
     [string]$ArtifactRoot = '',
     [string]$RunId = ('run-' + (Get-Date -Format 'yyyyMMdd-HHmmss')),
-    [int]$TimeoutSeconds = 120,
-    [switch]$T12FallbackWired
+    [int]$TimeoutSeconds = 120
 )
 
 Set-StrictMode -Version Latest
@@ -182,48 +171,38 @@ try {
         }
         $results.t07Pass = [bool]($statusOk -and $codeOk -and $busyOk -and $noMutation)
 
-        # ---- T12: fallback CANNOT be claimed while wiring blocker stands -------
-        if (-not $T12FallbackWired) {
-            $results.t12 = [ordered]@{
-                proofStatus = 'BLOCKED_OWNER_WIRING'
-                reason = 'AvailabilityService does not consume AvailabilityCachePort (owner-change-requests.md); a plain GET success/failure here would prove nothing about MySQL fallback.'
-                ownerRequestPending = $true
-            }
-            $results.t12Pass = $false
-        } else {
-            # Candidate proof path (owner-attested). STRICT assertions required:
-            # HTTP 200 + envelope code 0 + data present + zero DB mutation.
-            $preT12 = Get-MutationSnapshot -Label 't12-pre'
-            $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
-            $availStatus = 0; $availNote = ''; $json2 = $null
-            try {
-                $r2 = Invoke-WebRequest -Uri "$BaseUrl/api/v1/resources/$ResourceId/available-slots?date=$dateOnly" `
-                    -Method Get -Headers $headers -SkipHttpErrorCheck -TimeoutSec 30
-                $sw2.Stop()
-                $availStatus = [int]$r2.StatusCode
-                $availNote = Redact -Secrets @($studentToken) -Text ($r2.Content.Substring(0, [Math]::Min(400, $r2.Content.Length)))
-                try { $json2 = $r2.Content | ConvertFrom-Json } catch { }
-            } catch {
-                $sw2.Stop()
-                $availStatus = -1
-                $availNote = 'request threw (connection-level failure): ' + $_.Exception.Message
-            }
-            $postT12 = Get-MutationSnapshot -Label 't12-post'
-            $noT12Mutation = ($postT12.booking -eq $preT12.booking -and $postT12.slot -eq $preT12.slot -and $postT12.window -eq $preT12.window)
-            $envCode = if ($null -ne $json2) { [string]$json2.code } else { '' }
-            $dataPresent = ($null -ne $json2 -and $json2.PSObject.Properties['data'] -and $null -ne $json2.data)
-            $results.t12 = [ordered]@{
-                proofStatus = 'CANDIDATE_PROOF_OWNER_ATTESTED'
-                note = 'Owner asserts availability read path consumes the cache port; strict candidate assertions applied.'
-                httpStatus = $availStatus
-                envelopeCode = $envCode
-                dataPresent = [bool]$dataPresent
-                noMutation  = [bool]$noT12Mutation
-                latencyMs   = $sw2.ElapsedMilliseconds
-                consistencyNote = $availNote
-            }
-            $results.t12Pass = [bool](($availStatus -eq 200) -and ($envCode -eq '0') -and $dataPresent -and $noT12Mutation)
+        # ---- T12: merged cache-backed read must fall back to MySQL ---------------
+        # Strict live assertions: HTTP 200 + envelope code 0 + data + zero DB mutation.
+        $preT12 = Get-MutationSnapshot -Label 't12-pre'
+        $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
+        $availStatus = 0; $availNote = ''; $json2 = $null
+        try {
+            $r2 = Invoke-WebRequest -Uri "$BaseUrl/api/v1/resources/$ResourceId/available-slots?date=$dateOnly" `
+                -Method Get -Headers $headers -SkipHttpErrorCheck -TimeoutSec 30
+            $sw2.Stop()
+            $availStatus = [int]$r2.StatusCode
+            $availNote = Redact -Secrets @($studentToken) -Text ($r2.Content.Substring(0, [Math]::Min(400, $r2.Content.Length)))
+            try { $json2 = $r2.Content | ConvertFrom-Json } catch { }
+        } catch {
+            $sw2.Stop()
+            $availStatus = -1
+            $availNote = 'request threw (connection-level failure): ' + $_.Exception.Message
         }
+        $postT12 = Get-MutationSnapshot -Label 't12-post'
+        $noT12Mutation = ($postT12.booking -eq $preT12.booking -and $postT12.slot -eq $preT12.slot -and $postT12.window -eq $preT12.window)
+        $envCode = if ($null -ne $json2) { [string]$json2.code } else { '' }
+        $dataPresent = ($null -ne $json2 -and $json2.PSObject.Properties['data'] -and $null -ne $json2.data)
+        $results.t12 = [ordered]@{
+            proofStatus = 'LIVE_FALLBACK_OBSERVATION'
+            note = 'Merged AvailabilityService consumes AvailabilityCachePort; strict outage assertions applied.'
+            httpStatus = $availStatus
+            envelopeCode = $envCode
+            dataPresent = [bool]$dataPresent
+            noMutation  = [bool]$noT12Mutation
+            latencyMs   = $sw2.ElapsedMilliseconds
+            consistencyNote = $availNote
+        }
+        $results.t12Pass = [bool](($availStatus -eq 200) -and ($envCode -eq '0') -and $dataPresent -and $noT12Mutation)
     } finally {
         & docker @('compose', '-f', $ComposeFile, 'start', 'redis')
         if ($LASTEXITCODE -ne 0) { Write-Warning 'redis restart failed - operator action required' }
@@ -258,12 +237,8 @@ Write-Output $verdictLine
 if ($results.overallPass) { Write-Output 'PASS'; exit 0 }
 if (-not $results.t07Pass) { Write-Warning 'FAIL: T07 fail-closed assertions did not hold.'; exit 2 }
 if (-not $results.t12Pass) {
-    if ($T12FallbackWired) {
-        Write-Warning 'FAIL: owner-attested T12 candidate proof failed strict assertions (status/code/data/no-mutation).'
-        exit 2
-    }
-    Write-Warning 'FAIL/BLOCKED: T07 fail-closed held, but T12 fallback proof is unavailable until the owner completes cache-port wiring.'
-    exit 3
+    Write-Warning 'FAIL: T12 live fallback proof failed strict status/code/data/no-mutation assertions.'
+    exit 2
 }
 Write-Warning 'FAIL: redis did not recover within the deadline.'
 exit 2
