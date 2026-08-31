@@ -1160,8 +1160,9 @@ async function case08_conflict409RaceAndRefresh(ctx) {
   await session.waitFor('显示 时段刚被其他人预约 提示', () => document.body.textContent.includes('该时段刚被其他人预约，请刷新'));
   const refreshCalls = journal.availabilityCalls.filter((c) => c.ts > conflictRec.ts);
   expect(refreshCalls.length >= 1, '冲突后未自动刷新可用时段');
-  const refreshed = journal.lastAvailabilityPayload(conflictRec.ts);
-  expect(refreshed, '无法解析刷新后的 availability 载荷');
+  const refreshed = await waitForLocal('解析刷新后的 availability 载荷', () => (
+    journal.lastAvailabilityPayload(conflictRec.ts)
+  ), 12000);
   const refreshedTaken = refreshed.data.slots.filter((slot) => !slot.available).map((slot) => slot.startTime);
   expect(refreshedTaken.includes('11:00') && refreshedTaken.includes('11:30'), `刷新后的占用集合不含 11:00/11:30: ${refreshedTaken.join(',')}`);
   const noListRefresh = journal.countSince('bookingGets', conflictRec.ts) === 0;
