@@ -1,8 +1,9 @@
-# T13 Integration / E2E Slice (planning artifacts)
+# T13 Integration / E2E Slice
 
-> STATUS: **static only.** No maven, node, Chrome, or docker invocation has
-> ever been made from this slice. tasks 1.4 and 2.1–2.5 stay unchecked until
-> real runs produce redacted artifacts linked here.
+> STATUS: **partially executed.** ApiIntegration passed 195/195 across the fixed
+> 37-class inventory. StudentBrowser passed 15/15 in Chrome 152; its text
+> residual scan is zero and all 52 screenshots were manually reviewed.
+> ApprovalBrowser remains blocked by OCR-8; Docker-dependent E2E is not implied.
 
 ## Files
 
@@ -23,7 +24,7 @@ redacts Authorization headers and passwords, and its entrypoint is a single
 documented `-Action Run` call. No new browser automation is introduced by T13;
 the T08 harness is never copied or modified.
 
-## Runtime flow (documented, NOT executed)
+## Runtime flow
 
 ```powershell
 pwsh deploy/e2e/run.ps1                                   # plan mode
@@ -68,7 +69,7 @@ Mode semantics:
 ## Redaction / privacy
 
 * `redact-artifacts.mjs` processes ONLY the T13 run artifact directory
-  (text extensions, ≤8MB per file), applying counted rules: Authorization
+  (text extensions, ≤64MB per file), applying counted rules: Authorization
   Bearer, Cookie/Set-Cookie, sensitive JSON/kv fields, emails, CN mobile +
   bare 11-digit numbers, studentNo/realName fields. Oversize text files
   cannot be proven redacted and FAIL CLOSED (exit 2, recorded as
@@ -86,8 +87,9 @@ Mode semantics:
 * ApprovalBrowser: deterministic fixture + approved command missing (OCR-8).
 * Per-state browser refresh matrix (approve/check-in/no-show) not automated —
   API-level equivalents covered (see `inventory.md` gaps).
-* Fixture attestation for StudentBrowser has not been granted by the T01
-  fixture owner yet (`fixtureAttested: false` in the template).
-* The integration env-gates (RESOURCE_MYSQL_URL etc.) have never been supplied
-  in this environment; first Execute will BLOCK until the disposable namespace
-  is provisioned.
+* The committed template remains safely unattested; the actual run used an
+  ignored, loopback-only profile plus the existing T08 scoped seed/teardown.
+* Evidence: `deploy/artifacts/e2e-ApiIntegration-t13-api-integration-pass/` and
+  `deploy/artifacts/e2e-StudentBrowser-t13-student-browser-final/` (ignored).
+  The latter contains a PASS 15/15 report, zero-residual redaction manifest,
+  and 52/52 manually reviewed PNGs containing generated QA data only.

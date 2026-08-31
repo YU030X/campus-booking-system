@@ -118,3 +118,20 @@ Evidence from the authorized local run on 2026-08-28:
 
 No owner action remains for OCR-9. T13 must still preserve its own fresh backend
 gate output before checking task 7.1.
+
+## OCR-10 (T10): no-show processor fixture raced the live scheduler
+
+Status: RESOLVED IN OWNER BRANCH. The first T13 backend gate failed 1/387 at
+`NoShowMysqlIntegrationTest`; a targeted rerun passed 4/4, identifying a timing
+race rather than a product failure. T10 changed processor-only fixtures to a
+future non-scannable start so the processor selector owns time eligibility.
+Owner commit `4ef792c` passed three consecutive 4/4 runs; the merged T13 backend
+gate then passed 387/387.
+
+## OCR-11 (T08): availability refresh evidence was sampled too early
+
+Status: RESOLVED IN OWNER BRANCH. The first real StudentBrowser run reached
+11/15 because case 08 inspected the refreshed availability journal before the
+request completed, cascading into cases 09-11. T08 now waits up to 12 seconds
+for a new availability payload (`6e51a98`). The merged final run passed 15/15;
+this is a harness evidence fix, not a business/frontend source change.

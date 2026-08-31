@@ -83,7 +83,8 @@ blocked gate : <T13 task ids + gate that cannot proceed>
 request      : <what the owner should change; T13 makes NO edit itself>
 ```
 
-Live requests are filed in `deploy/owner-change-requests.md` (OCR-1 … OCR-8).
+Live and resolved requests are filed in `deploy/owner-change-requests.md`
+(OCR-1 … OCR-11; unused numbers are intentionally not backfilled).
 
 ## 6. Runner selection (task 1.4) ✅
 

@@ -1,9 +1,9 @@
 # T13 Deployment and Verification Assets
 
 Scope: T13 `deploy/**` files only. Static checks, local runner checks, backend/
-frontend acceptance, Compose config validation, and plans are recorded as they
-run; Docker runtime, recovery, load, browser, and external gates retain explicit
-NOT RUN/BLOCKED states until their own evidence exists.
+frontend acceptance, Compose config validation, API integration, StudentBrowser,
+and plans are recorded as they run; Docker runtime, recovery, load,
+ApprovalBrowser, and external gates retain explicit NOT RUN/BLOCKED states.
 
 ## Files
 
@@ -87,9 +87,9 @@ docker compose --env-file .env down                    # volumes preserved
 | `jmeter/run.ps1` | plan default; one round per execution, deep-validated loopback BaseUrl, same-slot token via temp secret props (never argv) with verified cleanup, distinct via validated 100-row runtime CSV path; pre/post row evidence via container auth | authored, never run |
 | `jmeter/summarize.ps1` | offline XML JTL classification (success/business_conflict/system_busy/server/connection/data_error/other) + strict protected 1/99/0 + slot-delta assertions; digest-only redacted reports | authored, never run |
 | `jmeter/README.md` | flow, JTL privacy/redaction, comparability rules, blockers | planning doc |
-| `e2e/profile.example.json` | isolated loopback E2E profile template; credential ENV NAMES only; public/prod denied | authored, never run |
-| `e2e/run.ps1` | Plan default; ApiIntegration (explicit class set, missing class blocks) / StudentBrowser (reuses T08 harness) / ApprovalBrowser (never passes; blocked without owner attestation) / All | authored, never run |
-| `e2e/redact-artifacts.mjs` | offline artifact redactor; manifest path/rule/count only; residual-scan exit 2 | authored, never run |
+| `e2e/profile.example.json` | isolated loopback E2E profile template; credential ENV NAMES only; public/prod denied | template; ignored runtime instance exercised |
+| `e2e/run.ps1` | Plan default; ApiIntegration (explicit class set, missing class blocks) / StudentBrowser (reuses T08 harness) / ApprovalBrowser (never passes; blocked without owner attestation) / All | API 195/195 + Student 15/15 executed |
+| `e2e/redact-artifacts.mjs` | offline artifact redactor; manifest path/rule/count only; residual-scan exit 2 | executed; residual 0 |
 | `e2e/inventory.md` | requirement → real `file:class` coverage map + browser cases + honest gaps | authored |
 | `e2e/README.md` | runner approval rationale, flow, redaction, blockers | planning doc |
 | `evidence/preconditions.md` | baseline/worktree record, integrated owner/spec-sync evidence, T04–T12 owner index, T13 ownership map + stop-and-request template, runner selection | living evidence doc |
@@ -98,7 +98,7 @@ docker compose --env-file .env down                    # volumes preserved
 | `demo/run.ps1` | Setup/StudentFlow/Teardown/All; RNG passwords in verified temp secret file; scope-limited teardown; EPHEMERAL-SETUP labeling | authored, never run |
 | `demo/evidence-index.template.md` | requirement→artifact mapping; all NOT RUN/DRAFT placeholders | template |
 | `demo/README.md` | ephemeral-vs-seed contract, safety, generated passwords, Draft evidence, blockers | planning doc |
-| `artifacts/` | raw run evidence; git-ignored except its `.gitignore` | empty until real runs |
+| `artifacts/` | raw run evidence; git-ignored except its `.gitignore` | contains local backend/frontend/config/API/browser evidence |
 
 All scripts require PowerShell 7, are parameterized, refuse non-local
 endpoints, redact credentials in artifacts, and clean up throwaway containers
