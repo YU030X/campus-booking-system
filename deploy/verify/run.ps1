@@ -102,6 +102,8 @@ if ($Mode -eq 'Check') {
         & node --check $file.FullName *> $null
         if ($LASTEXITCODE -ne 0) { [void]$failures.Add("Node: $($file.FullName)") }
     }
+    & node --test (Join-Path $repoRoot 'deploy\e2e\redact-artifacts.test.mjs') *> $null
+    if ($LASTEXITCODE -ne 0) { [void]$failures.Add('Node redaction contract test') }
     $jmx = Join-Path $repoRoot 'deploy\jmeter\booking-concurrency.jmx'
     try { [xml](Get-Content -LiteralPath $jmx -Raw) | Out-Null } catch { [void]$failures.Add("JMX XML: $jmx") }
     Push-Location $repoRoot

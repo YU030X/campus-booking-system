@@ -28,9 +28,8 @@
  * Oversize-unredacted files also force exit 2.
  * Exit codes: 0 clean | 2 residual/oversize | 3 usage error.
  */
-'use strict';
-const fs = require('node:fs');
-const path = require('node:path');
+import fs from 'node:fs';
+import path from 'node:path';
 
 const target = process.argv[2];
 if (!target) {
