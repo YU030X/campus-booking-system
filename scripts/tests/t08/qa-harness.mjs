@@ -1,5 +1,6 @@
 ﻿import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, appendFileSync, existsSync, rmSync } from 'node:fs';
+import { createConnection } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -35,6 +36,45 @@ const STATUS_LABELS = Object.freeze({
 const STATUS_LABEL_VALUES = Object.freeze(Object.values(STATUS_LABELS));
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function redisCommand(...args) {
+  const host = process.env.T08_QA_REDIS_HOST || '127.0.0.1';
+  const port = Number(process.env.T08_QA_REDIS_PORT || 6379);
+  const request = `*${args.length}\r\n${args.map((arg) => {
+    const value = String(arg);
+    return `$${Buffer.byteLength(value)}\r\n${value}\r\n`;
+  }).join('')}`;
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({ host, port });
+    let response = '';
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error(`Redis command timeout ${host}:${port}`));
+    }, 5000);
+    socket.setEncoding('utf8');
+    socket.once('connect', () => socket.write(request));
+    socket.on('data', (chunk) => {
+      response += chunk;
+      if (!response.endsWith('\r\n')) return;
+      clearTimeout(timer);
+      socket.end();
+      if (response.startsWith('-')) reject(new Error(`Redis error: ${response.trim()}`));
+      else resolve(response.trim());
+    });
+    socket.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+async function holdBookingLock(resourceId, date) {
+  const key = `booking:lock:${resourceId}:${date}`;
+  await redisCommand('DEL', key);
+  await redisCommand('HSET', key, 't08-harness-holder', '1');
+  await redisCommand('PEXPIRE', key, '15000');
+  return async () => { await redisCommand('DEL', key); };
+}
 
 function shanghaiParts(date = new Date()) {
   const fmt = new Intl.DateTimeFormat('zh-CN', {
@@ -732,7 +772,7 @@ async function openCreatePanel(session, resourceId, date) {
   await session.eval(jsClickButtonByText('main section', '选择可用时段'));
   await session.waitFor('抽屉打开且时段就绪', (resId, dateStr) => {
     const drawer = document.querySelector('.el-drawer');
-    if (!drawer) return false;
+    if (!drawer || drawer.getClientRects().length === 0 || getComputedStyle(drawer).visibility === 'hidden') return false;
     if (!document.body.textContent.includes(`资源编号：${resId}`)) return false;
     if (!document.body.textContent.includes(`预约日期：${dateStr}`)) return false;
     if (document.body.textContent.includes('可用时段加载中')) return false;
@@ -742,7 +782,10 @@ async function openCreatePanel(session, resourceId, date) {
 
 async function closeCreatePanel(session) {
   await session.eval(jsClickButtonByText('.el-drawer', '取消'));
-  await session.waitFor('抽屉关闭', () => !document.querySelector('.el-drawer'));
+  await session.waitFor('抽屉关闭', () => {
+    const drawer = document.querySelector('.el-drawer');
+    return !drawer || drawer.getClientRects().length === 0 || getComputedStyle(drawer).visibility === 'hidden';
+  });
 }
 
 async function case03_safeQueryHandoff(ctx) {
@@ -751,12 +794,14 @@ async function case03_safeQueryHandoff(ctx) {
   await session.navigate(`${FRONTEND}/bookings?resourceId=${RESOURCE_ID}&date=${TOMORROW}`);
   await session.waitFor('安全 query 自动打开创建抽屉', (resId, dateStr) => {
     const drawer = document.querySelector('.el-drawer');
-    return !!drawer && document.body.textContent.includes(`资源编号：${resId}`) && document.body.textContent.includes(`预约日期：${dateStr}`);
+    return !!drawer && drawer.getClientRects().length > 0 && getComputedStyle(drawer).visibility !== 'hidden'
+      && document.body.textContent.includes(`资源编号：${resId}`) && document.body.textContent.includes(`预约日期：${dateStr}`);
   }, WAIT_TIMEOUT_MS, RESOURCE_ID, TOMORROW);
   await session.waitFor('自动拉取可用时段完成', () => !!document.querySelector('.el-drawer .slot-picker'));
   const availabilityCalls = journal.availabilityCalls.filter((c) => c.ts > marker && c.params === TOMORROW);
   expect(availabilityCalls.length >= 1, '安全 handoff 未触发真实 available-slots 请求');
-  const payload = journal.lastAvailabilityPayload(marker);
+  const envelope = journal.lastAvailabilityPayload(marker);
+  const payload = envelope?.data;
   expect(payload?.resourceId === RESOURCE_ID && payload?.date === TOMORROW, 'availability 载荷与请求不符');
   expect(Array.isArray(payload?.slots) && payload.slots.every((slot) => slot.available === true), '种子日期应全部可用');
   await session.shot('03-safe-handoff-open');
@@ -765,7 +810,7 @@ async function case03_safeQueryHandoff(ctx) {
 }
 
 async function case04_unsafeQueryRejected(ctx) {
-  const { session, summary } = ctx;
+  const { session, journal, summary } = ctx;
   const variants = [
     { name: 'bad-resource-id', query: `resourceId=abc&date=${TOMORROW}` },
     { name: 'malformed-date', query: `resourceId=${RESOURCE_ID}&date=2026-13-39` },
@@ -781,7 +826,10 @@ async function case04_unsafeQueryRejected(ctx) {
     await sleep(700);
     const pathOk = await session.eval('location.pathname');
     const searchOk = await session.eval('location.search');
-    const drawerGone = !(await session.waitFor('确认未打开抽屉', () => !document.querySelector('.el-drawer'), 2200));
+    const drawerGone = await session.waitFor('确认未打开抽屉', () => {
+      const drawer = document.querySelector('.el-drawer');
+      return !drawer || drawer.getClientRects().length === 0 || getComputedStyle(drawer).visibility === 'hidden';
+    }, 2200);
     const noXss = await session.eval('window.__t08xss === undefined');
     const availabilityDelta = journalSnapshot(journal) - availabilityBefore;
     expect(pathOk === '/bookings', `${variant.name}: 路由被改变为 ${pathOk}`);
@@ -799,8 +847,11 @@ function journalSnapshot(journal) { return journal.availabilityCalls.length; }
 
 async function waitForParsedEntry(session, record, label = '响应体解析', timeoutMs = 6000) {
   if (!record?.entry) throw new CaseFailure(`${label}: 记录缺失`);
-  await session.waitFor(label, () => (record.entry.parsedBody !== null && record.entry.parsedBody !== undefined ? record.entry.parsedBody : null), timeoutMs);
-  return record.entry.parsedBody;
+  return waitForLocal(label, () => (
+    record.entry.parsedBody !== null && record.entry.parsedBody !== undefined
+      ? record.entry.parsedBody
+      : null
+  ), timeoutMs);
 }
 
 async function case05_availabilitySelectionGuards(ctx) {
@@ -821,7 +872,7 @@ async function case05_availabilitySelectionGuards(ctx) {
     duration: ([...document.querySelectorAll('.el-drawer p')].find((p) => (p.textContent || '').startsWith('时长：'))?.textContent || '').trim(),
   });
   await session.waitFor('时段按钮渲染', () => document.querySelectorAll('.slot-picker button').length > 0);
-  const payload = journal.lastAvailabilityPayload(Date.now() - 30000);
+  const payload = journal.lastAvailabilityPayload(Date.now() - 30000)?.data;
   expect(payload?.slots?.length > 0, 'availability 为空，请先执行 seed.sql 并在当天运行');
   const domButtons = await session.evalObj(pickerJs);
   expect(domButtons.buttons.length === payload.slots.length, `DOM 时段数 ${domButtons.buttons.length} 与服务端 ${payload.slots.length} 不一致`);
@@ -853,11 +904,45 @@ async function case05_availabilitySelectionGuards(ctx) {
 
   await session.eval(byStart('15:30'));
   await session.shot('05-selection-clean');
+
+  await closeCreatePanel(session);
+  await openCreatePanel(session, RESOURCE_ID, TOMORROW);
+  const clockSet = await session.evalObj((nowText) => {
+    let component = document.querySelector('.el-drawer')?.__vueParentComponent || null;
+    while (component && !Object.prototype.hasOwnProperty.call(component.setupState || {}, 'nowText')) {
+      component = component.parent;
+    }
+    if (!component) return { ok: false };
+    component.setupState.nowText = nowText;
+    return { ok: true, value: component.setupState.nowText };
+  }, `${TOMORROW} 23:15:00`);
+  expect(clockSet.ok, '无法定位创建面板 nowText 时钟 seam');
+  await session.waitFor('过去时段重新渲染', () => [...document.querySelectorAll('.slot-picker button')]
+    .every((button) => button.disabled && (button.textContent || '').includes('已过期')));
+  const pastProbe = await session.evalObj(() => {
+      const buttons = [...document.querySelectorAll('.slot-picker button')];
+      const pressedBefore = buttons.filter((button) => button.getAttribute('aria-pressed') === 'true').length;
+      buttons[0]?.click();
+      return {
+        count: buttons.length,
+        disabled: buttons.filter((button) => button.disabled).length,
+        expiredLabels: buttons.filter((button) => (button.textContent || '').includes('已过期')).length,
+        pressedBefore,
+        pressedAfter: buttons.filter((button) => button.getAttribute('aria-pressed') === 'true').length,
+      };
+  });
+  expect(pastProbe.count > 0, '时钟 seam 下未渲染真实 availability 时段');
+  expect(pastProbe.disabled === pastProbe.count && pastProbe.expiredLabels === pastProbe.count,
+    `过去时段未全部禁用并标注已过期: ${JSON.stringify(pastProbe)}`);
+  expect(pastProbe.pressedAfter === pastProbe.pressedBefore, '点击过去时段改变了选择状态');
+  await session.shot('05-past-slots-disabled-by-clock-seam');
+  await closeCreatePanel(session);
   summary.selectionGuards = {
     slotCountServer: payload.slots.length,
     contiguousPairDerived: '08:00→09:00 60 分钟',
     nonContiguousRejected: true,
     todayEmptyState: '当天暂无可预约时段',
+    pastSlots: '真实明日 availability + 浏览器时钟 seam 推进到当日 23:15，全部禁用且标注已过期',
     noFreeTimeInput: true,
   };
 }
@@ -907,19 +992,36 @@ async function case06_disabledUnavailableSlots(ctx) {
 async function armFetchHold(ctx) {
   const { session, held } = ctx;
   held.paused = [];
+  held.responses = [];
   held.resolved = false;
   await session.evalObj(() => true);
   const conn = session.conn;
   const sid = session.sid;
   await conn.send('Fetch.enable', {
-    patterns: [{ urlPattern: `${FRONTEND}/api/v1/bookings`, requestStage: 'Request' }],
+    patterns: [
+      { urlPattern: `${FRONTEND}/api/v1/bookings`, requestStage: 'Request' },
+      { urlPattern: `${FRONTEND}/api/v1/bookings`, requestStage: 'Response' },
+    ],
     handleAuthRequests: false,
   }, sid);
   const handler = async (params, s) => {
     if (s !== sid) return;
-    if (params.request?.method === 'POST') {
-      held.paused.push(params.requestId);
+    if (params.request?.method === 'POST' && params.responseStatusCode == null) {
+      held.paused.push({
+        requestId: params.requestId,
+        networkId: params.networkId,
+        request: params.request,
+      });
       held.at = Date.now();
+      return;
+    }
+    if (params.request?.method === 'POST' && params.responseStatusCode != null) {
+      const raw = await conn.send('Fetch.getResponseBody', { requestId: params.requestId }, sid);
+      const body = raw?.base64Encoded
+        ? Buffer.from(raw.body || '', 'base64').toString('utf8')
+        : (raw?.body || '');
+      held.responses.push({ at: Date.now(), status: params.responseStatusCode, body });
+      await conn.send('Fetch.continueRequest', { requestId: params.requestId }, sid);
       return;
     }
     await conn.send('Fetch.continueRequest', { requestId: params.requestId }, sid).catch(() => {});
@@ -937,7 +1039,7 @@ async function disarmFetchHold(ctx) {
 async function resumeHeldRequest(ctx) {
   const { session, held } = ctx;
   expect(held.paused.length > 0, '没有捕获到被拦截的提交请求');
-  await session.conn.send('Fetch.continueRequest', { requestId: held.paused[0] }, session.sid);
+  await session.conn.send('Fetch.continueRequest', { requestId: held.paused[0].requestId }, session.sid);
 }
 
 async function case07_createDedupReal201(ctx) {
@@ -984,25 +1086,28 @@ async function case07_createDedupReal201(ctx) {
   expect(held.paused.length === 1, `重复激活应只产生一次创建请求，实际被拦截 ${held.paused.length}`);
 
   await resumeHeldRequest({ session, held });
+  const heldResponse = await waitForLocal('HTTP 201 创建结果', () => (
+    held.responses.find((item) => item.status === 201) || null
+  ), 12000);
   await disarmFetchHold({ session, held });
 
-  const postRecord = await waitForLocal('HTTP 201 创建结果', () => {
-    return journal.findBookingsPost(held.at ?? Date.now() - 60000, (item) => item.entry.responseStatus === 201) || null;
-  }, 12000);
-  const postBody = await waitForParsedEntry(session, postRecord, '解析 201 响应体');
+  const postBody = JSON.parse(heldResponse.body);
   expect(postBody?.code === 0, '201 响应 envelope 异常');
   const view = postBody.data;
   expect(view.status === 'CONFIRMED', `need_approval=0 的资源应直接 CONFIRMED，实际 ${view.status}`);
   expect(/^\d+$/.test(String(view.id)), `预订 id 应为十进制字符串, 实际 ${JSON.stringify(view.id)}`);
-  const requestPayload = JSON.parse(postRecord.entry.postData);
+  const requestPayload = JSON.parse(held.paused[0].request.postData);
   expect(requestPayload.purpose === 'T08 QA 端到端验收', `purpose 未做 trim: "${requestPayload.purpose}"`);
   expect(requestPayload.attendeeCount === 1, 'attendeeCount 应为 1');
   expect(requestPayload.startTime === `${TOMORROW} 08:00:00` && requestPayload.endTime === `${TOMORROW} 09:00:00`, 'start/end 派生错误');
   expect(Object.keys(requestPayload).sort().join(',') === 'attendeeCount,endTime,purpose,resourceId,startTime', '请求字段集合漂移');
 
-  await session.waitFor('201 后抽屉关闭', () => !document.querySelector('.el-drawer'));
-  await session.waitFor('201 后自动刷新列表', () => journal.countSince('bookingGets', postRecord.ts) >= 1);
-  const refreshGet = journal.findBookingGetByQuery(postRecord.ts, { pageNumber: 1 });
+  await session.waitFor('201 后抽屉关闭', () => {
+    const drawer = document.querySelector('.el-drawer');
+    return !drawer || drawer.getClientRects().length === 0 || getComputedStyle(drawer).visibility === 'hidden';
+  });
+  await waitForLocal('201 后自动刷新列表', () => journal.countSince('bookingGets', heldResponse.at) >= 1, 12000);
+  const refreshGet = journal.findBookingGetByQuery(heldResponse.at, { pageNumber: 1 });
   expect(!!refreshGet, '未观察到创建后 GET /bookings 刷新');
   await session.shot('07-created-201-drawer-closed');
 
@@ -1057,12 +1162,42 @@ async function case08_conflict409RaceAndRefresh(ctx) {
   expect(refreshCalls.length >= 1, '冲突后未自动刷新可用时段');
   const refreshed = journal.lastAvailabilityPayload(conflictRec.ts);
   expect(refreshed, '无法解析刷新后的 availability 载荷');
-  const refreshedTaken = refreshed.slots.filter((slot) => !slot.available).map((slot) => slot.startTime);
+  const refreshedTaken = refreshed.data.slots.filter((slot) => !slot.available).map((slot) => slot.startTime);
   expect(refreshedTaken.includes('11:00') && refreshedTaken.includes('11:30'), `刷新后的占用集合不含 11:00/11:30: ${refreshedTaken.join(',')}`);
   const noListRefresh = journal.countSince('bookingGets', conflictRec.ts) === 0;
   expect(noListRefresh, 'slot-conflict 分支不应触发列表刷新');
 
   await session.shot('08-409-slot-conflict');
+
+  await closeCreatePanel(session);
+  await openCreatePanel(session, RESOURCE_ID, TOMORROW);
+  await session.eval(clickSlot('14:30'));
+  await session.eval(clickSlot('15:00'));
+  const busyMarker = Date.now();
+  const releaseBusyLock = await holdBookingLock(RESOURCE_ID, TOMORROW);
+  let busyRec;
+  let busyBody;
+  try {
+    await session.evalObj(() => {
+      const submit = [...document.querySelectorAll('.el-drawer button')]
+        .find((button) => (button.textContent || '').includes('提交预约'));
+      submit.click();
+      return true;
+    });
+    busyRec = await waitForLocal('真实 Redis 锁忙 409 返回', () => (
+      journal.findBookingsPost(busyMarker, (item) => item.entry.responseStatus === 409) || null
+    ), 12000);
+    busyBody = await waitForParsedEntry(session, busyRec, '解析锁忙 409 响应体');
+  } finally {
+    await releaseBusyLock();
+  }
+  expect(busyBody?.code === 43000, `锁忙 code 应为 43000，实际 ${busyBody?.code}`);
+  expect(busyBody?.message === '当前预约请求较多，请稍后重试', `锁忙后端文案漂移: ${busyBody?.message}`);
+  await session.waitFor('显示系统繁忙且不误称时段冲突', () => document.body.textContent.includes('当前预约请求较多，请稍后重试')
+    && !document.body.textContent.includes('该时段刚被其他人预约，请刷新'));
+  expect(journal.availabilityCalls.filter((call) => call.ts > busyRec.ts).length === 0,
+    '锁忙分支不应刷新 availability');
+  await session.shot('08-409-system-busy-real-redis-lock');
 
   await closeCreatePanel(session);
   await openCreatePanel(session, RESOURCE_ID, TOMORROW);
@@ -1079,7 +1214,10 @@ async function case08_conflict409RaceAndRefresh(ctx) {
   }, 12000);
   const recoveredBody = await waitForParsedEntry(session, recovered, '解析恢复 201 响应体');
   expect(recoveredBody?.data?.status === 'CONFIRMED', '恢复创建状态异常');
-  await session.waitFor('恢复后抽屉关闭', () => !document.querySelector('.el-drawer'));
+  await session.waitFor('恢复后抽屉关闭', () => {
+    const drawer = document.querySelector('.el-drawer');
+    return !drawer || drawer.getClientRects().length === 0 || getComputedStyle(drawer).visibility === 'hidden';
+  });
   await session.shot('08-recovered-201');
 
   state.recoveryCreatedBooking = recoveredBody.data;
@@ -1093,6 +1231,13 @@ async function case08_conflict409RaceAndRefresh(ctx) {
     availabilityReloaded: true,
     refreshedOccupied: refreshedTaken,
     listRefreshSkipped: true,
+    systemBusy: {
+      injectedBy: `真实 Redis hash lock booking:lock:${RESOURCE_ID}:${TOMORROW}`,
+      httpStatus: 409,
+      code: busyBody.code,
+      backendMessage: busyBody.message,
+      availabilityReloaded: false,
+    },
     recoveryBookingId: state.recoveryCreatedBooking.id,
   };
 }
@@ -1160,7 +1305,8 @@ async function case10_paginationAndStatusFilter(ctx) {
 
   const page1FirstNo = await session.evalObj(() => document.querySelector('.el-table__row td')?.textContent.trim());
   await session.evalObj(() => { document.querySelector('.el-pagination .btn-next')?.click(); return true; });
-  await session.waitFor('第 2 页请求发生', () => !!journal.findBookingGetByQuery(marker, { pageNumber: 2 }), 8000);
+  await waitForLocal('第 2 页请求发生', () => journal.findBookingGetByQuery(marker, { pageNumber: 2 }), 8000);
+  await session.waitFor('第 2 页数据渲染', (firstNo) => document.querySelector('.el-table__row td')?.textContent.trim() !== firstNo, 8000, page1FirstNo);
   const page2FirstNo = await session.evalObj(() => document.querySelector('.el-table__row td')?.textContent.trim());
   expect(page1FirstNo !== page2FirstNo, `翻页后首行未变化 ${page1FirstNo}`);
   await session.shot('10-page2');
@@ -1172,7 +1318,7 @@ async function case10_paginationAndStatusFilter(ctx) {
     item?.click();
     return { picked: !!item };
   });
-  await session.waitFor('pageSize=20 的请求发生', () => !!journal.findBookingGetByQuery(marker, { pageNumber: 1, pageSize: 20 }), 8000);
+  await waitForLocal('pageSize=20 的请求发生', () => journal.findBookingGetByQuery(marker, { pageNumber: 1, pageSize: 20 }), 8000);
   const resetCheck = journal.findBookingGetByQuery(marker, { pageNumber: 1, pageSize: 20 });
   expect(resetCheck.page === 1 && resetCheck.size === 20, '切页大小未回到第 1 页');
   await session.shot('10-pagesize-20');
@@ -1188,7 +1334,7 @@ async function case10_paginationAndStatusFilter(ctx) {
 
   await session.eval(statusSelectSet('CANCELLED'));
   await session.eval(jsClickButtonByText('form[aria-label="预约状态筛选"]', '筛选'));
-  await session.waitFor('status=CANCELLED 过滤请求发生', () => !!journal.findBookingGetByQuery(marker, { status: 'CANCELLED' }), 8000);
+  await waitForLocal('status=CANCELLED 过滤请求发生', () => journal.findBookingGetByQuery(marker, { status: 'CANCELLED' }), 8000);
   await session.waitFor('过滤后全部行都为 已取消', () => {
     const rows = [...document.querySelectorAll('.el-table__row')];
     return rows.length === 10 && rows.every((row) => row.textContent.includes('已取消'));
@@ -1197,8 +1343,8 @@ async function case10_paginationAndStatusFilter(ctx) {
 
   await session.eval(statusSelectSet('PENDING_APPROVAL'));
   await session.eval(jsClickButtonByText('form[aria-label="预约状态筛选"]', '筛选'));
-  await session.waitFor('status=PENDING_APPROVAL 空态', () => !!journal.findBookingGetByQuery(marker, { status: 'PENDING_APPROVAL' })
-    && document.body.textContent.includes('暂无预约'), 8000);
+  await waitForLocal('status=PENDING_APPROVAL 过滤请求发生', () => journal.findBookingGetByQuery(marker, { status: 'PENDING_APPROVAL' }), 8000);
+  await session.waitFor('status=PENDING_APPROVAL 空态', () => document.body.textContent.includes('暂无预约'), 8000);
   await session.shot('10-filter-empty');
 
   summary.pagination = {
@@ -1268,25 +1414,24 @@ async function case12_cancelRefreshPersistence(ctx) {
   await session.eval(jsClickButtonByText('article', '取消预约'));
   await session.waitFor('取消对话框出现', () => !!document.querySelector('.el-dialog textarea'));
   await session.eval(jsSetValue('.el-dialog textarea', 'QA T08 取消验证'));
+  const cancelMarkerTs = Date.now();
   await session.evalObj(() => {
     const buttons = [...document.querySelectorAll('.el-dialog button')];
     buttons.find((b) => (b.textContent || '').includes('确认取消'))?.click();
     return true;
   });
 
-  const cancelPost = await session.waitFor('取消请求与响应', () => {
-    for (let i = journal.counter; i > 0; i -= 1) { /* noop; use helper below */ break; }
-    return null;
-  }, 50).catch(() => null);
-  void cancelPost;
+  const cancelPost = await waitForLocal('取消 POST 出现并成功', () => journal.findCancelPost(
+    cancelMarkerTs,
+    (entry) => entry.entry.responseStatus === 200,
+  ), 12000);
+  const cancelBody = await waitForParsedEntry(session, cancelPost, '解析取消响应体');
+  expect(cancelBody?.code === 0, `取消响应 envelope 异常: ${JSON.stringify(cancelBody).slice(0, 200)}`);
 
-  const cancelMarkerTs = Date.now() - 30000;
-  await session.waitFor('取消 POST 出现并成功', async () => {
-    const entries = [];
-    return entries.length > 0;
-  }, 50).catch(() => null);
-
-  await session.waitFor('对话框关闭', () => !document.querySelector('.el-dialog'));
+  await session.waitFor('对话框关闭', () => {
+    const dialog = document.querySelector('.el-dialog');
+    return !dialog || dialog.getClientRects().length === 0 || getComputedStyle(dialog).visibility === 'hidden';
+  });
   await session.waitFor('详情刷新为已取消', () => document.body.textContent.includes('已取消')
     && [...document.querySelectorAll('.el-descriptions__label')].find((l) => l.textContent.includes('取消原因')));
 
@@ -1349,8 +1494,8 @@ async function case13_unsafeIdsAndNotFound(ctx) {
   void got404;
   void MARK_BASE;
 
-  const resourceEntries = await session.evalObj(() => performance.getEntriesByType('resource')
-    .filter((e) => e.name.includes(`/api/v1/bookings/${unknownId}`)).length);
+  const resourceEntries = await session.evalObj((id) => performance.getEntriesByType('resource')
+    .filter((e) => e.name.includes(`/api/v1/bookings/${id}`)).length, unknownId);
   expect(resourceEntries >= 1, '合法未知 ID 应发起真实请求');
   await session.shot('13-unknown-id-404');
 
@@ -1390,16 +1535,17 @@ async function case14_session401Behaviors(ctx) {
   const injectScript = `
     sessionStorage.setItem('campus.auth.session', JSON.stringify({token:'hydration-bogus-token',tokenType:'Bearer',expiresAt:Date.now()+3600000}));
   `;
-  const { scriptId } = await session.conn.send('Page.addScriptToEvaluateOnNewDocument', { source: injectScript }, session.sid);
+  const { identifier } = await session.conn.send('Page.addScriptToEvaluateOnNewDocument', { source: injectScript }, session.sid);
   await session.navigate(`${FRONTEND}/bookings`);
-  await session.waitFor('401 后跳转登录页', () => location.pathname === '/login' && location.search.includes('redirect=%2Fbookings'));
+  await session.waitFor('401 后跳转登录页', () => location.pathname === '/login'
+    && new URLSearchParams(location.search).get('redirect') === '/bookings');
   const storageCleared = await session.evalObj(() => sessionStorage.getItem('campus.auth.session') === null);
   expect(storageCleared, '过期会话未被共享处理器清除');
   await session.shot('14a-hydration-401-redirect');
-  await session.conn.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: scriptId }, session.sid);
+  await session.conn.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }, session.sid);
 
   await loginProgrammaticSameOrigin(ctx, USER_A);
-  await session.reload();
+  await session.navigate(`${FRONTEND}/bookings`);
   await session.waitFor('恢复会话后列表可见', () => document.body.textContent.includes('我的预约'));
 
   const poisonAndRefetch = async () => session.evalObj(async () => {
@@ -1452,6 +1598,7 @@ async function case15_forbidden403PreservesSession(ctx) {
       forbiddenFlag: auth.forbidden,
       roleStillStudent: auth.role,
       sessionPresent: sessionStorage.getItem('campus.auth.session') !== null,
+      path: location.pathname,
     };
   });
 
@@ -1459,7 +1606,7 @@ async function case15_forbidden403PreservesSession(ctx) {
   expect(outcome.forbiddenFlag === true, '共享 403 拦截器未置位 forbidden 状态');
   expect(outcome.sessionPresent === true, '403 后会话被误清除');
   expect(outcome.roleStillStudent === 'STUDENT', '403 改变了用户角色');
-  expect(location.pathname === '/bookings' || location.pathname === '', '403 引发了意外跳转');
+  expect(outcome.path === '/bookings', `403 引发了意外跳转: ${outcome.path}`);
   await session.shot('15-forbidden-session-preserved');
 
   summary.session403 = {
@@ -1586,9 +1733,7 @@ async function main() {
     '1. PENDING_APPROVAL/REJECTED/CHECKED_IN/COMPLETED/NO_SHOW 五个状态的浏览器级展示无学生侧确定性夹具:',
     '   seed.sql 的 QA 资源 need_approval=0(直发 CONFIRMED), 且夹具约束禁止向 DB 写入审批/签到/违规行;',
     '   本轮以 CONFIRMED 与 CANCELLED 两个可达状态验证 14 字段渲染与单节点七状态 timeline 口径, 其余五状态仍是纯单元夹具覆盖。',
-    '2. past-slot 视觉态依赖“当日存在营业规则”的时间相关夹具; seed.sql 仅建立明日规则, 今日只能验证空态(无法构成过去时段chip)。isPastSlot 属组件纯函数已有单测。',
-    '3. 409 第二分支(锁忙 “当前预约请求较多”)需 Redis 锁竞争注入, 无夹具手段; 未以任何 stub 替代。',
-    '4. ` 当天跨零点运行会造成“明日”漂移, 须与 seed 同日运行(见前置条件)。',
+    '2. 当天跨零点运行会造成“明日”漂移, 须与 seed 同日运行(见前置条件)。',
   ].join('\n');
   const preconditionNotes = [
     '(a) MySQL 已应用 V001..V005 迁移, Redis 可用;',
@@ -1629,9 +1774,6 @@ async function main() {
     return 2;
   }
 
-  const session = new Session(browser, evidence, journal);
-  const ctx = { session, journal, summary, driverEvidence, held: {} };
-
   try {
     const launchInfo = await browser.launch();
     meta.chromeVersion = launchInfo.chromeVersion;
@@ -1644,6 +1786,9 @@ async function main() {
     await browser.shutdown();
     return 1;
   }
+
+  const session = new Session(browser, evidence, journal);
+  const ctx = { session, journal, summary, driverEvidence, held: {} };
 
   for (const testCase of CASES) {
     const startedAt = Date.now();

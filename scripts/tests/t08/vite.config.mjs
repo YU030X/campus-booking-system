@@ -1,6 +1,6 @@
 ﻿import { fileURLToPath } from 'node:url';
 import { defineConfig } from '../../../booking-web/node_modules/vite/dist/node/index.js';
-import vue from '../../../booking-web/node_modules/@vitejs/plugin-vue/dist/index.js';
+import vue from '../../../booking-web/node_modules/@vitejs/plugin-vue/dist/index.mjs';
 
 const root = fileURLToPath(new URL('../../../booking-web/', import.meta.url));
 

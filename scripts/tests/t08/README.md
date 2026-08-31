@@ -26,6 +26,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\tests\t08\run.ps1 -A
 | --- | --- | --- |
 | `T08_QA_FRONTEND` | `http://127.0.0.1:4173` | 前端 dev server 地址 |
 | `T08_QA_BACKEND` | `http://127.0.0.1:18080` | 后端 API 地址 |
+| `T08_QA_REDIS_HOST` | `127.0.0.1` | 真实 Redis 锁忙分支注入地址 |
+| `T08_QA_REDIS_PORT` | `6379` | 真实 Redis 锁忙分支注入端口 |
 
 ## Run 前置条件(Windows PowerShell, 手动执行; 未给出的值一律用占位符自行填写, 不要把真实密码写进任何文件)
 
@@ -70,6 +72,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\tests\t08\run.ps1 -A
 ## 已知 gap(详见 REPORT.md)
 
 - PENDING_APPROVAL/REJECTED/CHECKED_IN/COMPLETED/NO_SHOW 五状态的浏览器级展示无确定性夹具,浏览器级仅覆盖 CONFIRMED/CANCELLED。
-- past-slot 视觉态依赖当日营业规则夹具,seed 仅建明日规则。
-- 409 第二分支(Redis 锁忙)无注入手段,未以 stub 替代。
 - 当天跨零点运行会造成"明日"漂移,须与 seed 同日运行。
+
+past-slot 由真实明日 availability 配合浏览器组件时钟 seam 验证；409 锁忙分支通过真实 Redis `RLock` key 的竞争状态验证，不使用 API mock/stub。
