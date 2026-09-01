@@ -2,6 +2,7 @@
 
 Date: 2026-09-01
 Branch: `codex/verify-and-deploy-system`  
+Implementation baseline: `a31ac1e fix: close Docker recovery gates`
 Worktree: `D:\Projects\project1_campus\target\worktrees\verify-and-deploy-system`  
 Status: **DRAFT / partially accepted; do not archive**
 OpenSpec apply progress: **20/34 tasks complete**
@@ -22,6 +23,10 @@ OpenSpec apply progress: **20/34 tasks complete**
   `deploy/artifacts/t13-image-build-20260901-current/` records base RepoDigests,
   non-root users and exit 0. All four Compose services are healthy; only edge is
   published, on loopback `127.0.0.1:18080`.
+- Local Docker SBOM generation completed with exit 0 for both application images:
+  `deploy/artifacts/t13-local-sbom-20260901/api.syft.json` and
+  `deploy/artifacts/t13-local-sbom-20260901/edge.syft.json`. These are ignored
+  package inventories only; they are not vulnerability/CVE scan results.
 - Empty-database migration passes in
   `deploy/artifacts/t13-empty-migration-20260901-final/`: exact MySQL digest,
   two fresh databases, 12 tables, 34 keys, zero rows, identical fingerprints,
@@ -62,6 +67,9 @@ OpenSpec apply progress: **20/34 tasks complete**
 - T13 commits `2dbbfb5` and `2faecc8`: make the redactor executable as ESM,
   preserve child-command logs, and accept bounded text evidence up to 64 MiB
   while still failing closed above the limit.
+- T13 commit `a31ac1e`: closes the local Docker image, empty-migration,
+  backup/restore, restart-persistence, and Redis-outage gates and records the
+  corresponding evidence and fail-closed harness checks.
 
 ## Remaining blockers — keep tasks unchecked
 
@@ -72,8 +80,8 @@ OpenSpec apply progress: **20/34 tasks complete**
    executable (OCR-8). Direct StudentBrowser evidence does not satisfy the
    approval-path half of task 2.4.
 3. Remote vulnerability/dependency scanning is not run. Fixed local base
-   RepoDigests and application image IDs are recorded, but no external scanner
-   result is claimed.
+   RepoDigests, application image IDs, and local Syft-format SBOM inventories are
+   recorded, but no external scanner or CVE result is claimed.
 4. No host/domain, DNS ownership, TLS mechanism, credentials, or external
    deployment authorization exists (OCR-2). Tasks 8.1-8.3 remain blocked and no
    public URL/TLS claim is allowed.
@@ -91,6 +99,8 @@ OpenSpec apply progress: **20/34 tasks complete**
 - The current-checkout API/edge images and cached MySQL/Redis images form a
   healthy four-service local stack. API/MySQL/Redis remain unexposed; edge is
   loopback-only.
+- A fresh `docker compose ps` check immediately before this handoff update still
+  showed all four services running and healthy.
 - `deploy/.env` is ignored and untracked; generated artifacts remain ignored.
 - The Docker profile explicitly enables Redis and availability cache. Operation
   log, notifications, and statistics retain their independent default-false
@@ -115,10 +125,16 @@ OpenSpec apply progress: **20/34 tasks complete**
   unreachable base `0e53b7e`, while the verified shared base is `2ffae9d`.
   Do not rewrite or check that task without explicit user confirmation.
 - No push has been performed.
+- The tracked worktree was clean at `a31ac1e` before this handoff-only edit.
+- Work paused before any planned JMeter report-schema or synthetic contract-test
+  edits. JMeter/Syft/Trivy/Grype CLIs remain absent; Docker's local SBOM command
+  was available and produced the inventories listed above.
 
 ## Safe continuation order
 
-1. Obtain JMeter plus owner-provided historical/fixture artifacts before any
+1. Contract-test the existing JMeter plan/runner/summarizer using synthetic JTL
+   only if continuing local harness work; do not claim a real performance pass.
+   Obtain JMeter plus owner-provided historical/fixture artifacts before any
    concurrency execution. Never fabricate weakened migrations or mock results.
 2. Obtain the ApprovalBrowser owner contract before executing that lane.
 3. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
