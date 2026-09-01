@@ -151,6 +151,13 @@ function Invoke-Api {
     }
 }
 
+function ConvertTo-SqlUtf8Literal {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+    if ($bytes.Length -eq 0) { return "CONVERT(X'' USING utf8mb4)" }
+    return ('CONVERT(0x{0} USING utf8mb4)' -f [Convert]::ToHexString($bytes))
+}
+
 # ---- Load profile ---------------------------------------------------------------
 if (-not (Test-Path -LiteralPath $ProfilePath)) { Write-Warning "BLOCKED: demo profile not found: $ProfilePath"; exit 3 }
 $profile0 = Get-Content -LiteralPath $ProfilePath -Raw | ConvertFrom-Json
@@ -219,6 +226,12 @@ function New-DemoPassword {
     return [Convert]::ToBase64String($b).TrimEnd('=').Replace('+', 'A').Replace('/', 'B')
 }
 
+function New-DemoOwnershipTag {
+    $bytes = New-Object byte[] 16
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    return [Convert]::ToHexString($bytes).ToLowerInvariant()
+}
+
 $secretFile = $null
 $secretCleanupFailed = $false
 $createdMapPath = (Join-Path $Artifacts 'fixture-map.json')
@@ -269,12 +282,17 @@ function Invoke-DemoSetup {
     # foreign row in the same RunId scope must be recovered/reviewed, never
     # silently adopted as this run's fixture.
     $categoryName = Get-DemoCategoryName
+    $ownershipTag = New-DemoOwnershipTag
+    $resourceDescription = "T13 ephemeral demo approval room ownership:$ownershipTag"
     $expectedUsernames = @('admin', 'student', 'intruder') | ForEach-Object { "${userPrefix}_$_" }
-    $expectedUserIn = '(' + (@($expectedUsernames | ForEach-Object { "'$_'" }) -join ', ') + ')'
-    $expectedPurposeIn = "('${purposePrefix}pending', '${purposePrefix}past-confirmed')"
+    $expectedUserIn = '(' + (@($expectedUsernames | ForEach-Object { ConvertTo-SqlUtf8Literal $_ }) -join ', ') + ')'
+    $expectedPurposes = @("${purposePrefix}pending", "${purposePrefix}past-confirmed")
+    $expectedPurposeIn = '(' + (@($expectedPurposes | ForEach-Object { ConvertTo-SqlUtf8Literal $_ }) -join ', ') + ')'
+    $categoryNameSql = ConvertTo-SqlUtf8Literal $categoryName
+    $resourceNameSql = ConvertTo-SqlUtf8Literal $resourceName
     $existingUsers = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM ``user`` WHERE username IN $expectedUserIn").Trim()
-    $existingCategory = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_category WHERE name='$categoryName'").Trim()
-    $existingResource = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource WHERE name='$resourceName'").Trim()
+    $existingCategory = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_category WHERE name=$categoryNameSql").Trim()
+    $existingResource = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource WHERE name=$resourceNameSql").Trim()
     $existingBookings = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM booking WHERE purpose IN $expectedPurposeIn").Trim()
     if ($existingUsers -ne '0' -or $existingCategory -ne '0' -or $existingResource -ne '0' -or $existingBookings -ne '0') {
         Write-Warning 'REFUSED: demo RunId namespace is not empty; recover/review the exact prior scope before retrying.'
@@ -288,12 +306,14 @@ function Invoke-DemoSetup {
     $recoveryScope = [ordered]@{
         runId = $RunId
         fixtureOwner = $fixtureOwner
+        ownershipTag = $ownershipTag
         userPrefix = $userPrefix
         usernames = $expectedUsernames
         purposePrefix = $purposePrefix
         purposes = @("${purposePrefix}pending", "${purposePrefix}past-confirmed")
         categoryName = $categoryName
         resourceName = $resourceName
+        resourceDescription = $resourceDescription
         preflightCounts = [ordered]@{
             users = $existingUsers
             category = $existingCategory
@@ -310,19 +330,24 @@ function Invoke-DemoSetup {
     # step fails in-process, finally may delete only these revalidated rows. The
     # journal is not acceptance evidence and never contains passwords or tokens.
     $script:recoveryJournal = [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         runId = $RunId
         fixtureOwner = $fixtureOwner
+        ownershipTag = $ownershipTag
         userPrefix = $userPrefix
         purposePrefix = $purposePrefix
         categoryName = $categoryName
         resourceName = $resourceName
+        resourceDescription = $resourceDescription
         status = 'SETUP_IN_PROGRESS - NON-SECRET COMPENSATION JOURNAL'
         users = @()
         category = $null
         resource = $null
         timeRuleIds = @()
         bookings = @()
+        bookingSlotIds = @()
+        violationRecordIds = @()
+        approvalRecordIds = @()
         updatedAt = (Get-Date).ToString('o')
     }
     Save-RecoveryJournal
@@ -341,7 +366,8 @@ function Invoke-DemoSetup {
             return 1
         }
         $users[$role] = [ordered]@{ username = $uname; password = $pwd }
-        $id = Invoke-RootSql -File $composeFile -Query "SELECT id FROM ``user`` WHERE username='$uname'"
+        $unameSql = ConvertTo-SqlUtf8Literal $uname
+        $id = Invoke-RootSql -File $composeFile -Query "SELECT id FROM ``user`` WHERE username=$unameSql"
         if ($id -notmatch '^\d+$') { throw "register did not persist $role user" }
         $ids[$role] = $id
         $script:recoveryJournal.users = @($script:recoveryJournal.users) + @([ordered]@{
@@ -352,7 +378,8 @@ function Invoke-DemoSetup {
     }
 
     # 3) Promote admin via container-side SQL.
-    $null = Invoke-RootSql -File $composeFile -Query "UPDATE ``user`` SET role='ADMIN' WHERE id=$($ids['admin']) AND username='$($users['admin'].username)'"
+    $adminUsernameSql = ConvertTo-SqlUtf8Literal ([string]$users['admin'].username)
+    $null = Invoke-RootSql -File $composeFile -Query "UPDATE ``user`` SET role='ADMIN' WHERE id=$($ids['admin']) AND username=$adminUsernameSql"
 
     # 4) Logins (tokens stay in memory + secret temp file only).
     foreach ($role in @('admin', 'student')) {
@@ -382,7 +409,7 @@ function Invoke-DemoSetup {
 
     $resBody = @{
         categoryId = $categoryId; name = $resourceName; location = 'T13-DEMO'
-        capacity = 1; description = 'T13 ephemeral demo approval room'
+        capacity = 1; description = $resourceDescription
         needApproval = $true; maxAdvanceDays = 7; minDurationMinutes = 30
         maxDurationMinutes = 120; status = 1
     } | ConvertTo-Json -Compress
@@ -394,7 +421,9 @@ function Invoke-DemoSetup {
     }
     $resId = [string]$rr.Data.id
     if ($resId -notmatch '^\d+$') { throw 'non-numeric resource id returned' }
-    $script:recoveryJournal.resource = [ordered]@{ id = $resId; name = $resourceName; categoryId = $categoryId }
+    $script:recoveryJournal.resource = [ordered]@{
+        id = $resId; name = $resourceName; categoryId = $categoryId; description = $resourceDescription
+    }
     $script:recoveryJournal.updatedAt = (Get-Date).ToString('o')
     Save-RecoveryJournal
 
@@ -433,6 +462,12 @@ function Invoke-DemoSetup {
     $script:recoveryJournal.bookings = @($script:recoveryJournal.bookings) + @([ordered]@{
         id = $pendingBookingId; purpose = "${purposePrefix}pending"; userId = $ids['student']; resourceId = $resId
     })
+    $pendingSlotIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM booking_slot WHERE booking_id=$pendingBookingId ORDER BY id" |
+        Where-Object { $_ -match '^\d+$' })
+    if ($pendingSlotIds.Count -ne 2 -or @($pendingSlotIds | Select-Object -Unique).Count -ne 2) {
+        throw 'pending booking did not create exactly two distinct slot ids'
+    }
+    $script:recoveryJournal.bookingSlotIds = $pendingSlotIds
     $script:recoveryJournal.updatedAt = (Get-Date).ToString('o')
     Save-RecoveryJournal
 
@@ -442,8 +477,11 @@ function Invoke-DemoSetup {
     #    wait briefly and record the outcome without asserting.
     $pastStart = (Get-Date).AddHours(-2).ToString('yyyy-MM-dd HH:mm:ss')
     $pastEnd   = (Get-Date).AddHours(-1).ToString('yyyy-MM-dd HH:mm:ss')
-    $null = Invoke-RootSql -File $composeFile -Query ("INSERT INTO ``booking`` (booking_no, user_id, resource_id, start_time, end_time, purpose, status) SELECT CONCAT('T13DEMO', LPAD(id, 8, '0')), {0}, {1}, '{2}', '{3}', '{4}past-confirmed', 'CONFIRMED' FROM ``user`` WHERE id = {0}" -f $ids['student'], $resId, $pastStart, $pastEnd, $purposePrefix)
-    $pastBookingId = (Invoke-RootSql -File $composeFile -Query "SELECT id FROM ``booking`` WHERE purpose='${purposePrefix}past-confirmed'").Trim()
+    $pastStartSql = ConvertTo-SqlUtf8Literal $pastStart
+    $pastEndSql = ConvertTo-SqlUtf8Literal $pastEnd
+    $pastPurposeSql = ConvertTo-SqlUtf8Literal "${purposePrefix}past-confirmed"
+    $null = Invoke-RootSql -File $composeFile -Query ("INSERT INTO ``booking`` (booking_no, user_id, resource_id, start_time, end_time, purpose, status) SELECT CONCAT('T13DEMO', LPAD(id, 8, '0')), {0}, {1}, {2}, {3}, {4}, 'CONFIRMED' FROM ``user`` WHERE id = {0}" -f $ids['student'], $resId, $pastStartSql, $pastEndSql, $pastPurposeSql)
+    $pastBookingId = (Invoke-RootSql -File $composeFile -Query "SELECT id FROM ``booking`` WHERE purpose=$pastPurposeSql").Trim()
     if ($pastBookingId -notmatch '^\d+$') { throw 'past CONFIRMED booking seed failed' }
     $script:recoveryJournal.bookings = @($script:recoveryJournal.bookings) + @([ordered]@{
         id = $pastBookingId; purpose = "${purposePrefix}past-confirmed"; userId = $ids['student']; resourceId = $resId
@@ -453,6 +491,14 @@ function Invoke-DemoSetup {
     # Two 30-minute slots for the 60-minute window (matches owner splitter shape).
     $null = Invoke-RootSql -File $composeFile -Query "INSERT INTO ``booking_slot`` (resource_id, slot_time, booking_id) SELECT resource_id, start_time, id FROM ``booking`` WHERE id=$pastBookingId"
     $null = Invoke-RootSql -File $composeFile -Query "INSERT INTO ``booking_slot`` (resource_id, slot_time, booking_id) SELECT resource_id, DATE_ADD(start_time, INTERVAL 30 MINUTE), id FROM ``booking`` WHERE id=$pastBookingId"
+    $allSlotIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM booking_slot WHERE booking_id IN ($pendingBookingId, $pastBookingId) ORDER BY id" |
+        Where-Object { $_ -match '^\d+$' })
+    if ($allSlotIds.Count -ne 4 -or @($allSlotIds | Select-Object -Unique).Count -ne 4) {
+        throw 'demo bookings did not create exactly four distinct slot ids'
+    }
+    $script:recoveryJournal.bookingSlotIds = $allSlotIds
+    $script:recoveryJournal.updatedAt = (Get-Date).ToString('o')
+    Save-RecoveryJournal
     Write-Warning 'PAST CONFIRMED booking inserted as EPHEMERAL-SETUP-NOT-ACCEPTANCE-EVIDENCE (owner scan will own the violation).'
 
     $violBefore = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM violation_record WHERE booking_id=$pastBookingId").Trim()
@@ -466,9 +512,28 @@ function Invoke-DemoSetup {
     $violAfter = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM violation_record WHERE booking_id=$pastBookingId").Trim()
     $noShowState = if ($violAfter -ne '0') { 'owner-scan-produced' } elseif ($violBefore -ne '0') { 'pre-existing' } else { 'pending-owner-scan' }
 
+    $bookingIdIn = "($pendingBookingId, $pastBookingId)"
+    $violationRecordIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM violation_record WHERE booking_id IN $bookingIdIn ORDER BY id" |
+        Where-Object { $_ -match '^\d+$' })
+    $approvalRecordIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM approval_record WHERE booking_id IN $bookingIdIn ORDER BY id" |
+        Where-Object { $_ -match '^\d+$' })
+    $userIdIn = "($($ids['admin']), $($ids['student']), $($ids['intruder']))"
+    $notificationIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM notification WHERE user_id IN $userIdIn ORDER BY id" |
+        Where-Object { $_ -match '^\d+$' })
+    $blacklistIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM blacklist WHERE user_id IN $userIdIn OR operator_id IN $userIdIn ORDER BY id" |
+        Where-Object { $_ -match '^\d+$' })
+    $operationLogIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM operation_log WHERE user_id IN $userIdIn ORDER BY id" |
+        Where-Object { $_ -match '^\d+$' })
+    $script:recoveryJournal.violationRecordIds = $violationRecordIds
+    $script:recoveryJournal.approvalRecordIds = $approvalRecordIds
+    $script:recoveryJournal.updatedAt = (Get-Date).ToString('o')
+    Save-RecoveryJournal
+
     # 8) fixture-map.json: NON-SECRET facts only (ids/usernames/purposes/times).
     $map = [ordered]@{
         runId = $RunId
+        fixtureOwner = $fixtureOwner
+        ownershipTag = $ownershipTag
         userPrefix = $userPrefix
         purposePrefix = $purposePrefix
         users = [ordered]@{
@@ -480,7 +545,14 @@ function Invoke-DemoSetup {
         demoCategoryName = $categoryName
         demoResourceId = $resId
         demoResourceName = $resourceName
+        demoResourceDescription = $resourceDescription
         demoTimeRuleIds = $ruleIds
+        bookingSlotIds = $allSlotIds
+        violationRecordIds = $violationRecordIds
+        approvalRecordIds = $approvalRecordIds
+        notificationIds = $notificationIds
+        blacklistIds = $blacklistIds
+        operationLogIds = $operationLogIds
         pendingBookingId = $pendingBookingId
         pastConfirmedBookingId = $pastBookingId
         pastWindow = [ordered]@{ start = $pastStart; end = $pastEnd }
@@ -492,7 +564,7 @@ function Invoke-DemoSetup {
     Set-Content -LiteralPath $createdMapPath -Value ($map | ConvertTo-Json -Depth 6) -Encoding utf8NoBOM
     # Make the exact map available to the same process's StudentFlow/finally
     # teardown without relying on case-insensitive $MapPath/$mapPath aliases.
-    $MapPath = $createdMapPath
+    $script:MapPath = $createdMapPath
     $script:recoveryJournal.status = 'SETUP_COMPLETE - fixture-map.json is authoritative'
     $script:recoveryJournal.updatedAt = (Get-Date).ToString('o')
     Save-RecoveryJournal
@@ -588,16 +660,20 @@ function Invoke-DemoPartialRecovery {
         Write-Warning 'REFUSED: partial recovery journal is not valid JSON.'
         return 2
     }
-    foreach ($required in @('schemaVersion', 'runId', 'userPrefix', 'purposePrefix', 'categoryName', 'resourceName', 'users', 'timeRuleIds', 'bookings')) {
+    foreach ($required in @('schemaVersion', 'runId', 'fixtureOwner', 'ownershipTag', 'userPrefix', 'purposePrefix', 'categoryName', 'resourceName', 'resourceDescription', 'users', 'timeRuleIds', 'bookings', 'bookingSlotIds', 'violationRecordIds', 'approvalRecordIds')) {
         if (-not $journal.PSObject.Properties[$required]) {
             Write-Warning "REFUSED: partial recovery journal is missing $required."
             return 2
         }
     }
     $expectedCategoryName = Get-DemoCategoryName
-    if ([long]$journal.schemaVersion -ne 1 -or [string]$journal.runId -ne $RunId -or
+    $journalOwnershipTag = [string]$journal.ownershipTag
+    $expectedResourceDescription = "T13 ephemeral demo approval room ownership:$journalOwnershipTag"
+    if ([long]$journal.schemaVersion -ne 2 -or [string]$journal.runId -ne $RunId -or
+        [string]$journal.fixtureOwner -ne $fixtureOwner -or $journalOwnershipTag -notmatch '^[0-9a-f]{32}$' -or
         [string]$journal.userPrefix -ne $userPrefix -or [string]$journal.purposePrefix -ne $purposePrefix -or
-        [string]$journal.categoryName -ne $expectedCategoryName -or [string]$journal.resourceName -ne $resourceName) {
+        [string]$journal.categoryName -ne $expectedCategoryName -or [string]$journal.resourceName -ne $resourceName -or
+        [string]$journal.resourceDescription -ne $expectedResourceDescription) {
         Write-Warning 'REFUSED: partial recovery journal namespace does not match this exact run.'
         return 2
     }
@@ -615,7 +691,8 @@ function Invoke-DemoPartialRecovery {
             return 2
         }
         $userIds += $id
-        $userPredicates += "(id=$id AND username='$username')"
+        $usernameSql = ConvertTo-SqlUtf8Literal $username
+        $userPredicates += "(id=$id AND username=$usernameSql)"
     }
     if (@($userIds | Select-Object -Unique).Count -ne $userIds.Count -or
         @($journalUsers | ForEach-Object { [string]$_.role } | Select-Object -Unique).Count -ne $journalUsers.Count) {
@@ -637,7 +714,7 @@ function Invoke-DemoPartialRecovery {
     if ($null -ne $resource) {
         $resourceId = [string]$resource.id
         if ($null -eq $category -or $resourceId -notmatch '^\d+$' -or [string]$resource.name -ne $resourceName -or
-            [string]$resource.categoryId -ne $categoryId) {
+            [string]$resource.categoryId -ne $categoryId -or [string]$resource.description -ne $expectedResourceDescription) {
             Write-Warning 'REFUSED: partial recovery resource tuple is invalid.'
             return 2
         }
@@ -655,6 +732,7 @@ function Invoke-DemoPartialRecovery {
     $bookingIds = @()
     $bookingPredicates = @()
     $studentTuple = @($journalUsers | Where-Object { [string]$_.role -eq 'student' })
+    $adminTuple = @($journalUsers | Where-Object { [string]$_.role -eq 'admin' })
     foreach ($booking in $bookings) {
         $id = [string]$booking.id
         $purpose = [string]$booking.purpose
@@ -667,33 +745,87 @@ function Invoke-DemoPartialRecovery {
             return 2
         }
         $bookingIds += $id
-        $bookingPredicates += "(id=$id AND purpose='$purpose' AND user_id=$userId AND resource_id=$bookingResourceId)"
+        $purposeSql = ConvertTo-SqlUtf8Literal $purpose
+        $bookingPredicates += "(id=$id AND purpose=$purposeSql AND user_id=$userId AND resource_id=$bookingResourceId)"
     }
     if (@($bookingIds | Select-Object -Unique).Count -ne $bookingIds.Count -or
         @($bookings | ForEach-Object { [string]$_.purpose } | Select-Object -Unique).Count -ne $bookings.Count) {
         Write-Warning 'REFUSED: partial recovery booking tuples must be unique.'
         return 2
     }
+    if ($bookingIds.Count -gt 0 -and $adminTuple.Count -ne 1) {
+        Write-Warning 'REFUSED: partial recovery booking tuples require exactly one journaled admin.'
+        return 2
+    }
+
+    $journalChildIds = [ordered]@{}
+    foreach ($propertyName in @('bookingSlotIds', 'violationRecordIds', 'approvalRecordIds')) {
+        $values = @($journal.$propertyName | ForEach-Object { [string]$_ })
+        if (@($values | Where-Object { $_ -notmatch '^\d+$' }).Count -gt 0 -or
+            @($values | Select-Object -Unique).Count -ne $values.Count) {
+            Write-Warning "REFUSED: partial recovery $propertyName must contain distinct numeric ids."
+            return 2
+        }
+        $journalChildIds[$propertyName] = $values
+    }
+    $slotIds = @($journalChildIds.bookingSlotIds)
+    $violationIds = @($journalChildIds.violationRecordIds)
+    $approvalIds = @($journalChildIds.approvalRecordIds)
+    if (($slotIds.Count -gt 0 -or $violationIds.Count -gt 0 -or $approvalIds.Count -gt 0) -and $bookingIds.Count -eq 0) {
+        Write-Warning 'REFUSED: partial recovery child ids require journaled booking parents.'
+        return 2
+    }
+    $slotIn = if ($slotIds.Count -gt 0) { '(' + ($slotIds -join ', ') + ')' } else { '' }
+    $violationIn = if ($violationIds.Count -gt 0) { '(' + ($violationIds -join ', ') + ')' } else { '' }
+    $approvalIn = if ($approvalIds.Count -gt 0) { '(' + ($approvalIds -join ', ') + ')' } else { '' }
+
+    $userIn = if ($userIds.Count -gt 0) { '(' + ($userIds -join ', ') + ')' } else { '' }
+    $bookingIn = if ($bookingIds.Count -gt 0) { '(' + ($bookingIds -join ', ') + ')' } else { '' }
+    $bookingScopeClauses = [System.Collections.Generic.List[string]]::new()
+    if ($userIds.Count -gt 0) { [void]$bookingScopeClauses.Add("user_id IN $userIn") }
+    if ($null -ne $resource) { [void]$bookingScopeClauses.Add("resource_id=$resourceId") }
+    if ($bookingIds.Count -gt 0) { [void]$bookingScopeClauses.Add("id IN $bookingIn") }
+    $bookingScopeWhere = $bookingScopeClauses -join ' OR '
+
+    $violationScopeClauses = [System.Collections.Generic.List[string]]::new()
+    $approvalScopeClauses = [System.Collections.Generic.List[string]]::new()
+    $slotScopeClauses = [System.Collections.Generic.List[string]]::new()
+    if ($userIds.Count -gt 0) {
+        [void]$violationScopeClauses.Add("user_id IN $userIn")
+        [void]$approvalScopeClauses.Add("approver_id IN $userIn")
+    }
+    if ($bookingIds.Count -gt 0) {
+        [void]$violationScopeClauses.Add("booking_id IN $bookingIn")
+        [void]$approvalScopeClauses.Add("booking_id IN $bookingIn")
+        [void]$slotScopeClauses.Add("booking_id IN $bookingIn")
+    }
+    if ($null -ne $resource) { [void]$slotScopeClauses.Add("resource_id=$resourceId") }
+    $violationScopeWhere = $violationScopeClauses -join ' OR '
+    $approvalScopeWhere = $approvalScopeClauses -join ' OR '
+    $slotScopeWhere = $slotScopeClauses -join ' OR '
 
     # Revalidate every recorded owner tuple before the first DELETE. Any missing,
     # extra, or foreign row blocks compensation rather than widening its scope.
     if ($userPredicates.Count -gt 0) {
         $ownedUsers = (Invoke-RootSql -File $composeFile -Query ('SELECT COUNT(*) FROM ``user`` WHERE ' + ($userPredicates -join ' OR '))).Trim()
         if ($ownedUsers -ne [string]$journalUsers.Count) { Write-Warning 'REFUSED: partial recovery user ownership mismatch; zero deletes executed.'; return 2 }
-        $userIn = '(' + ($userIds -join ', ') + ')'
         $notificationCount = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM notification WHERE user_id IN $userIn").Trim()
-        $blacklistCount = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM blacklist WHERE user_id IN $userIn").Trim()
-        if ($notificationCount -ne '0' -or $blacklistCount -ne '0') {
-            Write-Warning 'REFUSED: partial recovery found unjournaled notification/blacklist rows; zero deletes executed.'
+        $blacklistCount = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM blacklist WHERE user_id IN $userIn OR operator_id IN $userIn").Trim()
+        $operationLogCount = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM operation_log WHERE user_id IN $userIn").Trim()
+        if ($notificationCount -ne '0' -or $blacklistCount -ne '0' -or $operationLogCount -ne '0') {
+            Write-Warning 'REFUSED: partial recovery found unjournaled notification/blacklist/operation-log rows; zero deletes executed.'
             return 2
         }
     }
     if ($null -ne $category) {
-        $ownedCategory = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_category WHERE id=$categoryId AND name='$expectedCategoryName'").Trim()
+        $expectedCategoryNameSql = ConvertTo-SqlUtf8Literal $expectedCategoryName
+        $ownedCategory = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_category WHERE id=$categoryId AND name=$expectedCategoryNameSql").Trim()
         if ($ownedCategory -ne '1') { Write-Warning 'REFUSED: partial recovery category ownership mismatch; zero deletes executed.'; return 2 }
     }
     if ($null -ne $resource) {
-        $ownedResource = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource WHERE id=$resourceId AND name='$resourceName' AND category_id=$categoryId").Trim()
+        $resourceNameSql = ConvertTo-SqlUtf8Literal $resourceName
+        $resourceDescriptionSql = ConvertTo-SqlUtf8Literal $expectedResourceDescription
+        $ownedResource = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource WHERE id=$resourceId AND name=$resourceNameSql AND category_id=$categoryId AND description=$resourceDescriptionSql").Trim()
         if ($ownedResource -ne '1') { Write-Warning 'REFUSED: partial recovery resource ownership mismatch; zero deletes executed.'; return 2 }
         $actualRuleIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM resource_time_rule WHERE resource_id=$resourceId ORDER BY id" | Where-Object { $_ -match '^\d+$' })
         if ((@($actualRuleIds | Sort-Object) -join ',') -ne (@($ruleIds | Sort-Object) -join ',')) {
@@ -722,20 +854,25 @@ function Invoke-DemoPartialRecovery {
         $userWhere = $userPredicates -join ' OR '
         [void]$transaction.Add("SELECT id FROM ``user`` WHERE $userWhere FOR UPDATE")
         [void]$transaction.Add("SELECT id FROM notification WHERE user_id IN $userIn FOR UPDATE")
-        [void]$transaction.Add("SELECT id FROM blacklist WHERE user_id IN $userIn FOR UPDATE")
+        [void]$transaction.Add("SELECT id FROM blacklist WHERE user_id IN $userIn OR operator_id IN $userIn FOR UPDATE")
+        [void]$transaction.Add("SELECT id FROM operation_log WHERE user_id IN $userIn FOR UPDATE")
         [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM ``user`` WHERE $userWhere)=$($journalUsers.Count)")
         [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM notification WHERE user_id IN $userIn)=0")
-        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM blacklist WHERE user_id IN $userIn)=0")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM blacklist WHERE user_id IN $userIn OR operator_id IN $userIn)=0")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM operation_log WHERE user_id IN $userIn)=0")
         [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM ``user`` WHERE $userWhere)=0")
     }
     if ($null -ne $category) {
-        $categoryWhere = "id=$categoryId AND name='$expectedCategoryName'"
+        $expectedCategoryNameSql = ConvertTo-SqlUtf8Literal $expectedCategoryName
+        $categoryWhere = "id=$categoryId AND name=$expectedCategoryNameSql"
         [void]$transaction.Add("SELECT id FROM resource_category WHERE $categoryWhere FOR UPDATE")
         [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM resource_category WHERE $categoryWhere)=1")
         [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM resource_category WHERE $categoryWhere)=0")
     }
     if ($null -ne $resource) {
-        $resourceWhere = "id=$resourceId AND name='$resourceName' AND category_id=$categoryId"
+        $resourceNameSql = ConvertTo-SqlUtf8Literal $resourceName
+        $resourceDescriptionSql = ConvertTo-SqlUtf8Literal $expectedResourceDescription
+        $resourceWhere = "id=$resourceId AND name=$resourceNameSql AND category_id=$categoryId AND description=$resourceDescriptionSql"
         [void]$transaction.Add("SELECT id FROM resource WHERE $resourceWhere FOR UPDATE")
         [void]$transaction.Add("SELECT id FROM resource_time_rule WHERE resource_id=$resourceId FOR UPDATE")
         [void]$transaction.Add("SELECT id FROM resource_closure WHERE resource_id=$resourceId FOR UPDATE")
@@ -752,18 +889,51 @@ function Invoke-DemoPartialRecovery {
             [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM resource_time_rule WHERE resource_id=$resourceId)=0")
         }
     }
+    if ($bookingScopeClauses.Count -gt 0) {
+        [void]$transaction.Add("SELECT id FROM booking WHERE $bookingScopeWhere FOR UPDATE")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM booking WHERE $bookingScopeWhere)=$($bookings.Count)")
+        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM booking WHERE $bookingScopeWhere)=0")
+    }
+    if ($violationScopeClauses.Count -gt 0) {
+        [void]$transaction.Add("SELECT id FROM violation_record WHERE $violationScopeWhere FOR UPDATE")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM violation_record WHERE $violationScopeWhere)=$($violationIds.Count)")
+        if ($violationIds.Count -gt 0) {
+            [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM violation_record WHERE id IN $violationIn AND booking_id IN $bookingIn AND user_id=$([string]$studentTuple[0].id))=$($violationIds.Count)")
+        }
+        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM violation_record WHERE $violationScopeWhere)=0")
+    }
+    if ($approvalScopeClauses.Count -gt 0) {
+        [void]$transaction.Add("SELECT id FROM approval_record WHERE $approvalScopeWhere FOR UPDATE")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM approval_record WHERE $approvalScopeWhere)=$($approvalIds.Count)")
+        if ($approvalIds.Count -gt 0) {
+            [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM approval_record WHERE id IN $approvalIn AND booking_id IN $bookingIn AND approver_id=$([string]$adminTuple[0].id))=$($approvalIds.Count)")
+        }
+        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM approval_record WHERE $approvalScopeWhere)=0")
+    }
+    if ($slotScopeClauses.Count -gt 0) {
+        [void]$transaction.Add("SELECT id FROM booking_slot WHERE $slotScopeWhere FOR UPDATE")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM booking_slot WHERE $slotScopeWhere)=$($slotIds.Count)")
+        if ($slotIds.Count -gt 0) {
+            [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM booking_slot WHERE id IN $slotIn AND booking_id IN $bookingIn AND resource_id=$resourceId)=$($slotIds.Count)")
+        }
+        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM booking_slot WHERE $slotScopeWhere)=0")
+    }
     if ($bookingIds.Count -gt 0) {
-        $bookingIn = '(' + ($bookingIds -join ', ') + ')'
         $bookingWhere = $bookingPredicates -join ' OR '
-        [void]$transaction.Add("SELECT id FROM booking WHERE $bookingWhere FOR UPDATE")
-        [void]$transaction.Add("SELECT id FROM violation_record WHERE booking_id IN $bookingIn FOR UPDATE")
-        [void]$transaction.Add("SELECT id FROM approval_record WHERE booking_id IN $bookingIn FOR UPDATE")
-        [void]$transaction.Add("SELECT id FROM booking_slot WHERE booking_id IN $bookingIn FOR UPDATE")
         [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM booking WHERE $bookingWhere)=$($bookings.Count)")
-        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM booking WHERE id IN $bookingIn)=0")
-        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM violation_record WHERE booking_id IN $bookingIn)=0")
-        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM approval_record WHERE booking_id IN $bookingIn)=0")
-        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM booking_slot WHERE booking_id IN $bookingIn)=0")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM violation_record WHERE booking_id IN $bookingIn AND user_id<>$([string]$studentTuple[0].id))=0")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM approval_record WHERE booking_id IN $bookingIn AND approver_id<>$([string]$adminTuple[0].id))=0")
+        if ($userIds.Count -gt 0) {
+            [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM violation_record WHERE user_id IN $userIn AND booking_id NOT IN $bookingIn)=0")
+            [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM approval_record WHERE approver_id IN $userIn AND booking_id NOT IN $bookingIn)=0")
+        }
+        if ($null -ne $resource) {
+            [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM booking_slot WHERE booking_id IN $bookingIn AND resource_id<>$resourceId)=0")
+            [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM booking_slot WHERE resource_id=$resourceId AND booking_id NOT IN $bookingIn)=0")
+        }
+    } elseif ($userIds.Count -gt 0) {
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM violation_record WHERE user_id IN $userIn)=0")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM approval_record WHERE approver_id IN $userIn)=0")
     }
     if ($ownershipConditions.Count -eq 0) {
         Write-Warning 'REFUSED: partial recovery journal contains no recorded entity to compensate.'
@@ -771,9 +941,9 @@ function Invoke-DemoPartialRecovery {
     }
     [void]$transaction.Add('SET @ownership_ok := IF((' + ($ownershipConditions -join ') AND (') + '), 1, 0)')
     if ($bookingIds.Count -gt 0) {
-        [void]$transaction.Add("DELETE violation_record FROM violation_record JOIN booking ON violation_record.booking_id=booking.id WHERE booking.id IN $bookingIn AND @ownership_ok=1")
-        [void]$transaction.Add("DELETE approval_record FROM approval_record JOIN booking ON approval_record.booking_id=booking.id WHERE booking.id IN $bookingIn AND @ownership_ok=1")
-        [void]$transaction.Add("DELETE booking_slot FROM booking_slot JOIN booking ON booking_slot.booking_id=booking.id WHERE booking.id IN $bookingIn AND @ownership_ok=1")
+        if ($violationIds.Count -gt 0) { [void]$transaction.Add("DELETE FROM violation_record WHERE id IN $violationIn AND booking_id IN $bookingIn AND @ownership_ok=1") }
+        if ($approvalIds.Count -gt 0) { [void]$transaction.Add("DELETE FROM approval_record WHERE id IN $approvalIn AND booking_id IN $bookingIn AND @ownership_ok=1") }
+        if ($slotIds.Count -gt 0) { [void]$transaction.Add("DELETE FROM booking_slot WHERE id IN $slotIn AND booking_id IN $bookingIn AND @ownership_ok=1") }
         [void]$transaction.Add("DELETE FROM booking WHERE id IN $bookingIn AND @ownership_ok=1")
     }
     if ($ruleIds.Count -gt 0) { [void]$transaction.Add("DELETE FROM resource_time_rule WHERE id IN $ruleIn AND resource_id=$resourceId AND @ownership_ok=1") }
@@ -793,21 +963,21 @@ function Invoke-DemoPartialRecovery {
     }
 
     $leftUsers = if ($userPredicates.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query ('SELECT COUNT(*) FROM ``user`` WHERE ' + ($userPredicates -join ' OR '))).Trim() } else { '0' }
-    $leftBookings = if ($bookingIds.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query ('SELECT COUNT(*) FROM booking WHERE id IN (' + ($bookingIds -join ', ') + ')')).Trim() } else { '0' }
-    $leftViolations = if ($bookingIds.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query ('SELECT COUNT(*) FROM violation_record WHERE booking_id IN (' + ($bookingIds -join ', ') + ')')).Trim() } else { '0' }
-    $leftApprovals = if ($bookingIds.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query ('SELECT COUNT(*) FROM approval_record WHERE booking_id IN (' + ($bookingIds -join ', ') + ')')).Trim() } else { '0' }
-    $leftSlots = if ($bookingIds.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query ('SELECT COUNT(*) FROM booking_slot WHERE booking_id IN (' + ($bookingIds -join ', ') + ')')).Trim() } else { '0' }
-    $leftResource = if ($null -ne $resource) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource WHERE id=$resourceId AND name='$resourceName'").Trim() } else { '0' }
+    $leftBookings = if ($bookingScopeClauses.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM booking WHERE $bookingScopeWhere").Trim() } else { '0' }
+    $leftViolations = if ($violationScopeClauses.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM violation_record WHERE $violationScopeWhere").Trim() } else { '0' }
+    $leftApprovals = if ($approvalScopeClauses.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM approval_record WHERE $approvalScopeWhere").Trim() } else { '0' }
+    $leftSlots = if ($slotScopeClauses.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM booking_slot WHERE $slotScopeWhere").Trim() } else { '0' }
+    $leftResource = if ($null -ne $resource) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource WHERE id=$resourceId AND name=$resourceNameSql AND description=$resourceDescriptionSql").Trim() } else { '0' }
     $leftRules = if ($null -ne $resource) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_time_rule WHERE resource_id=$resourceId").Trim() } else { '0' }
     $leftClosures = if ($null -ne $resource) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_closure WHERE resource_id=$resourceId").Trim() } else { '0' }
-    $leftCategory = if ($null -ne $category) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_category WHERE id=$categoryId AND name='$expectedCategoryName'").Trim() } else { '0' }
+    $leftCategory = if ($null -ne $category) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_category WHERE id=$categoryId AND name=$expectedCategoryNameSql").Trim() } else { '0' }
     if ($leftUsers -ne '0' -or $leftBookings -ne '0' -or $leftViolations -ne '0' -or $leftApprovals -ne '0' -or
         $leftSlots -ne '0' -or $leftResource -ne '0' -or $leftRules -ne '0' -or $leftClosures -ne '0' -or $leftCategory -ne '0') {
         Write-Warning 'PARTIAL RECOVERY FAILED: recorded fixture rows remain.'
         return 1
     }
     $script:recoveryJournal = [ordered]@{
-        schemaVersion = 1; runId = $RunId; status = 'PARTIAL_SETUP_COMPENSATED'
+        schemaVersion = 2; runId = $RunId; ownershipTag = $journalOwnershipTag; status = 'PARTIAL_SETUP_COMPENSATED'
         compensatedAt = (Get-Date).ToString('o')
         removed = [ordered]@{ users = $journalUsers.Count; bookings = $bookings.Count; resource = [int]($null -ne $resource); category = [int]($null -ne $category) }
     }
@@ -817,16 +987,29 @@ function Invoke-DemoPartialRecovery {
 }
 
 function Invoke-DemoTeardown {
-    if (-not $MapPath -or -not (Test-Path -LiteralPath $MapPath)) {
+    if (-not $script:MapPath -or -not (Test-Path -LiteralPath $script:MapPath)) {
         Write-Warning 'BLOCKED: Teardown requires -MapPath to an existing fixture-map.json (never guess scope).'
         return 3
     }
-    $map = Get-Content -LiteralPath $MapPath -Raw | ConvertFrom-Json
+    $map = Get-Content -LiteralPath $script:MapPath -Raw | ConvertFrom-Json
+    if ([string]$map.runId -ne $RunId) {
+        Write-Warning 'REFUSED: fixture map runId does not match the requested RunId.'
+        return 2
+    }
     if ([string]$map.runId -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$' -or
         [string]$map.userPrefix -ne ('t13demo_' + ([string]$map.runId -replace '-', '_')) -or
         [string]$map.purposePrefix -ne ("T13DEMO:$($map.runId):") -or
         [string]$map.userPrefix -notmatch '^t13demo_[A-Za-z0-9_]+$') {
         Write-Warning 'REFUSED: fixture map namespace markers are invalid.'
+        return 2
+    }
+    $mapFixtureOwner = if ($map.PSObject.Properties['fixtureOwner']) { [string]$map.fixtureOwner } else { '' }
+    $ownershipTag = if ($map.PSObject.Properties['ownershipTag']) { [string]$map.ownershipTag } else { '' }
+    $resourceDescriptionFromMap = if ($map.PSObject.Properties['demoResourceDescription']) { [string]$map.demoResourceDescription } else { '' }
+    $expectedResourceDescription = "T13 ephemeral demo approval room ownership:$ownershipTag"
+    if ($mapFixtureOwner -ne $fixtureOwner -or $ownershipTag -notmatch '^[0-9a-f]{32}$' -or
+        $resourceDescriptionFromMap -ne $expectedResourceDescription) {
+        Write-Warning 'REFUSED: fixture map ownership provenance is invalid.'
         return 2
     }
     $resId = [string]$map.demoResourceId
@@ -842,6 +1025,15 @@ function Invoke-DemoTeardown {
         [string]$map.users.student.username,
         [string]$map.users.intruder.username
     )
+    $expectedMapUsernames = @(
+        "$($map.userPrefix)_admin",
+        "$($map.userPrefix)_student",
+        "$($map.userPrefix)_intruder"
+    )
+    if (($usernames -join "`n") -cne ($expectedMapUsernames -join "`n")) {
+        Write-Warning 'REFUSED: fixture map usernames do not match the fixed admin/student/intruder roles.'
+        return 2
+    }
     $purposes = @(
         ('{0}pending' -f [string]$map.purposePrefix),
         ('{0}past-confirmed' -f [string]$map.purposePrefix)
@@ -876,61 +1068,193 @@ function Invoke-DemoTeardown {
     if ($resId -notmatch '^\d+$') { Write-Warning 'REFUSED: fixture map resource id must be numeric.'; return 2 }
     $categoryId = [string]$map.demoCategoryId
     if ($categoryId -notmatch '^\d+$') { Write-Warning 'REFUSED: fixture map category id must be numeric.'; return 2 }
-
-    # Validate every destructive root tuple before the first DELETE. Numeric ids
-    # alone are insufficient because a tampered map could otherwise point at a
-    # foreign booking/resource/user. Exact purpose, username and ownership links
-    # must all match the map's deterministic namespace.
-    $ownedUsers = (Invoke-RootSql -File $composeFile -Query ("SELECT COUNT(*) FROM ``user`` WHERE (id={0} AND username='{1}') OR (id={2} AND username='{3}') OR (id={4} AND username='{5}')" -f `
-        $adminId, $usernames[0], $studId, $usernames[1], $intrId, $usernames[2])).Trim()
-    $ownedResource = (Invoke-RootSql -File $composeFile -Query ("SELECT COUNT(*) FROM resource r JOIN resource_category c ON c.id=r.category_id WHERE r.id={0} AND r.name='{1}' AND c.id={2} AND c.name='{3}'" -f `
-        $resId, $resourceNameFromMap, $categoryId, $categoryNameFromMap)).Trim()
-    $ownedBookings = (Invoke-RootSql -File $composeFile -Query ("SELECT COUNT(*) FROM booking WHERE (id={0} AND purpose='{1}' AND user_id={2} AND resource_id={3}) OR (id={4} AND purpose='{5}' AND user_id={2} AND resource_id={3})" -f `
-        $bookingIds[0], $purposes[0], $studId, $resId, $bookingIds[1], $purposes[1])).Trim()
-    if ($ownedUsers -ne '3' -or $ownedResource -ne '1' -or $ownedBookings -ne '2') {
-        Write-Warning 'REFUSED: fixture map ownership tuples do not match current database rows; zero teardown deletes executed.'
+    if (-not $map.PSObject.Properties['demoTimeRuleIds']) { Write-Warning 'REFUSED: fixture map time-rule ids are missing.'; return 2 }
+    $timeRuleIds = @($map.demoTimeRuleIds | ForEach-Object { [string]$_ })
+    if ($timeRuleIds.Count -eq 0 -or @($timeRuleIds | Where-Object { $_ -notmatch '^\d+$' }).Count -gt 0 -or
+        @($timeRuleIds | Select-Object -Unique).Count -ne $timeRuleIds.Count) {
+        Write-Warning 'REFUSED: fixture map time-rule ids must be non-empty, numeric and distinct.'
         return 2
     }
+    $mapChildIds = [ordered]@{}
+    foreach ($propertyName in @('bookingSlotIds', 'violationRecordIds', 'approvalRecordIds', 'notificationIds', 'blacklistIds', 'operationLogIds')) {
+        if (-not $map.PSObject.Properties[$propertyName]) {
+            Write-Warning "REFUSED: fixture map is missing exact child-id set $propertyName."
+            return 2
+        }
+        $values = @($map.$propertyName | ForEach-Object { [string]$_ })
+        if (@($values | Where-Object { $_ -notmatch '^\d+$' }).Count -gt 0 -or
+            @($values | Select-Object -Unique).Count -ne $values.Count) {
+            Write-Warning "REFUSED: fixture map $propertyName must contain distinct numeric ids."
+            return 2
+        }
+        $mapChildIds[$propertyName] = $values
+    }
+    $slotIds = @($mapChildIds.bookingSlotIds)
+    $violationIds = @($mapChildIds.violationRecordIds)
+    $approvalIds = @($mapChildIds.approvalRecordIds)
+    $notificationIds = @($mapChildIds.notificationIds)
+    $blacklistIds = @($mapChildIds.blacklistIds)
+    $operationLogIds = @($mapChildIds.operationLogIds)
+    $slotIn = if ($slotIds.Count -gt 0) { '(' + ($slotIds -join ', ') + ')' } else { '' }
+    $violationIn = if ($violationIds.Count -gt 0) { '(' + ($violationIds -join ', ') + ')' } else { '' }
+    $approvalIn = if ($approvalIds.Count -gt 0) { '(' + ($approvalIds -join ', ') + ')' } else { '' }
+    $notificationIn = if ($notificationIds.Count -gt 0) { '(' + ($notificationIds -join ', ') + ')' } else { '' }
+    $blacklistIn = if ($blacklistIds.Count -gt 0) { '(' + ($blacklistIds -join ', ') + ')' } else { '' }
+    $operationLogIn = if ($operationLogIds.Count -gt 0) { '(' + ($operationLogIds -join ', ') + ')' } else { '' }
 
     $preTotals = Invoke-RootSql -File $composeFile -Query 'SELECT (SELECT COUNT(*) FROM booking), (SELECT COUNT(*) FROM `user`)'
 
-    # Children before parents; STRICTLY fixture-scoped: exact usernames and
-    # exact purposes/user ids only. The demo resource id is used only for
-    # deleting the fixture resource itself; it must never broaden booking
-    # deletion to unrelated bookings made against that resource. NEVER drop a
-    # database, volume, or foreign row. No LIKE wildcards are used.
-    $quotedUsernames = @($usernames | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" })
-    $userIn = '(' + ($quotedUsernames -join ', ') + ')'
-    $quotedPurposes = @($purposes | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" })
-    $purposeIn = '(' + ($quotedPurposes -join ', ') + ')'
+    # Build exact deterministic tuples. The authoritative ownership check and
+    # children-first cleanup execute in one SERIALIZABLE transaction. A complete
+    # already-absent scope is an idempotent success; any partial/mismatched scope
+    # or incomplete child cleanup selects ROLLBACK.
+    $usernameLiterals = @($usernames | ForEach-Object { ConvertTo-SqlUtf8Literal $_ })
+    $usernameIn = '(' + ($usernameLiterals -join ', ') + ')'
+    $purposeLiterals = @($purposes | ForEach-Object { ConvertTo-SqlUtf8Literal $_ })
+    $purposeIn = '(' + ($purposeLiterals -join ', ') + ')'
+    $userIdIn = '(' + (@($adminId, $studId, $intrId) -join ', ') + ')'
     $bookingIn = '(' + ($bookingIds -join ', ') + ')'
-    $scoped = "booking.id IN $bookingIn"
-    $null = Invoke-RootSql -File $composeFile -Query "DELETE violation_record FROM violation_record JOIN booking ON violation_record.booking_id = booking.id WHERE $scoped"
-    $null = Invoke-RootSql -File $composeFile -Query "DELETE approval_record FROM approval_record JOIN booking ON approval_record.booking_id = booking.id WHERE $scoped"
-    $null = Invoke-RootSql -File $composeFile -Query "DELETE booking_slot FROM booking_slot JOIN booking ON booking_slot.booking_id = booking.id WHERE $scoped"
-    $null = Invoke-RootSql -File $composeFile -Query "DELETE booking FROM booking WHERE $scoped"
-    $null = Invoke-RootSql -File $composeFile -Query "DELETE notification FROM notification JOIN ``user`` ON notification.user_id = ``user``.id WHERE ``user``.username IN $userIn"
-    $null = Invoke-RootSql -File $composeFile -Query "DELETE blacklist FROM blacklist JOIN ``user`` ON blacklist.user_id = ``user``.id WHERE ``user``.username IN $userIn"
-    $null = Invoke-RootSql -File $composeFile -Query "DELETE FROM resource_time_rule WHERE resource_id = $resId"
-    $null = Invoke-RootSql -File $composeFile -Query "DELETE FROM resource_closure WHERE resource_id = $resId"
-    $null = Invoke-RootSql -File $composeFile -Query "DELETE FROM resource WHERE id = $resId AND name = '$resourceNameFromMap'"
-    $null = Invoke-RootSql -File $composeFile -Query "DELETE FROM resource_category WHERE id = $categoryId AND name = '$categoryNameFromMap'"
-    $null = Invoke-RootSql -File $composeFile -Query "DELETE FROM ``user`` WHERE username IN $userIn"
+    $ruleIn = '(' + ($timeRuleIds -join ', ') + ')'
+    $categoryNameSql = ConvertTo-SqlUtf8Literal $categoryNameFromMap
+    $resourceNameSql = ConvertTo-SqlUtf8Literal $resourceNameFromMap
+    $resourceDescriptionSql = ConvertTo-SqlUtf8Literal $resourceDescriptionFromMap
+    $userTupleWhere = "(id=$adminId AND username=$($usernameLiterals[0])) OR (id=$studId AND username=$($usernameLiterals[1])) OR (id=$intrId AND username=$($usernameLiterals[2]))"
+    $bookingTupleWhere = "(id=$($bookingIds[0]) AND purpose=$($purposeLiterals[0]) AND user_id=$studId AND resource_id=$resId) OR (id=$($bookingIds[1]) AND purpose=$($purposeLiterals[1]) AND user_id=$studId AND resource_id=$resId)"
+    $userCollisionWhere = "id IN $userIdIn OR username IN $usernameIn"
+    $categoryCollisionWhere = "id=$categoryId OR name=$categoryNameSql"
+    $resourceCollisionWhere = "id=$resId OR name=$resourceNameSql"
+    $bookingCollisionWhere = "id IN $bookingIn OR purpose IN $purposeIn"
+
+    $transaction = [System.Collections.Generic.List[string]]::new()
+    [void]$transaction.Add('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
+    [void]$transaction.Add('START TRANSACTION')
+    [void]$transaction.Add("SELECT id FROM ``user`` WHERE $userCollisionWhere FOR UPDATE")
+    [void]$transaction.Add("SELECT id FROM booking WHERE user_id IN $userIdIn OR resource_id=$resId OR $bookingCollisionWhere FOR UPDATE")
+    [void]$transaction.Add("SELECT id FROM violation_record WHERE user_id IN $userIdIn OR booking_id IN $bookingIn FOR UPDATE")
+    [void]$transaction.Add("SELECT id FROM approval_record WHERE approver_id IN $userIdIn OR booking_id IN $bookingIn FOR UPDATE")
+    [void]$transaction.Add("SELECT id FROM booking_slot WHERE resource_id=$resId OR booking_id IN $bookingIn FOR UPDATE")
+    [void]$transaction.Add("SELECT id FROM notification WHERE user_id IN $userIdIn FOR UPDATE")
+    [void]$transaction.Add("SELECT id FROM blacklist WHERE user_id IN $userIdIn OR operator_id IN $userIdIn FOR UPDATE")
+    [void]$transaction.Add("SELECT id FROM operation_log WHERE user_id IN $userIdIn FOR UPDATE")
+    [void]$transaction.Add("SELECT id FROM resource_category WHERE parent_id=$categoryId OR $categoryCollisionWhere FOR UPDATE")
+    [void]$transaction.Add("SELECT id FROM resource WHERE category_id=$categoryId OR $resourceCollisionWhere FOR UPDATE")
+    [void]$transaction.Add("SELECT id FROM resource_time_rule WHERE resource_id=$resId FOR UPDATE")
+    [void]$transaction.Add("SELECT id FROM resource_closure WHERE resource_id=$resId FOR UPDATE")
+
+    $ownershipConditions = @(
+        "(SELECT COUNT(*) FROM ``user`` WHERE $userTupleWhere)=3",
+        "(SELECT COUNT(*) FROM ``user`` WHERE $userCollisionWhere)=3",
+        "(SELECT COUNT(*) FROM resource_category WHERE id=$categoryId AND name=$categoryNameSql)=1",
+        "(SELECT COUNT(*) FROM resource_category WHERE $categoryCollisionWhere)=1",
+        "(SELECT COUNT(*) FROM resource_category WHERE parent_id=$categoryId)=0",
+        "(SELECT COUNT(*) FROM resource WHERE id=$resId AND name=$resourceNameSql AND category_id=$categoryId AND description=$resourceDescriptionSql)=1",
+        "(SELECT COUNT(*) FROM resource WHERE category_id=$categoryId OR $resourceCollisionWhere)=1",
+        "(SELECT COUNT(*) FROM booking WHERE $bookingTupleWhere)=2",
+        "(SELECT COUNT(*) FROM booking WHERE user_id IN $userIdIn OR resource_id=$resId OR $bookingCollisionWhere)=2",
+        "(SELECT COUNT(*) FROM resource_time_rule WHERE resource_id=$resId)=$($timeRuleIds.Count)",
+        "(SELECT COUNT(*) FROM resource_time_rule WHERE resource_id=$resId AND id IN $ruleIn)=$($timeRuleIds.Count)",
+        "(SELECT COUNT(*) FROM resource_closure WHERE resource_id=$resId)=0",
+        "(SELECT COUNT(*) FROM violation_record WHERE user_id IN $userIdIn AND booking_id NOT IN $bookingIn)=0",
+        "(SELECT COUNT(*) FROM violation_record WHERE booking_id IN $bookingIn AND user_id<>$studId)=0",
+        "(SELECT COUNT(*) FROM approval_record WHERE approver_id IN $userIdIn AND booking_id NOT IN $bookingIn)=0",
+        "(SELECT COUNT(*) FROM approval_record WHERE booking_id IN $bookingIn AND approver_id<>$adminId)=0",
+        "(SELECT COUNT(*) FROM blacklist WHERE operator_id IN $userIdIn AND user_id NOT IN $userIdIn)=0",
+        "(SELECT COUNT(*) FROM blacklist WHERE user_id IN $userIdIn AND operator_id IS NOT NULL)=0",
+        "(SELECT COUNT(*) FROM notification WHERE user_id IN $userIdIn AND biz_id IS NOT NULL AND biz_id NOT IN $bookingIn)=0",
+        "(SELECT COUNT(*) FROM booking_slot WHERE resource_id=$resId AND booking_id NOT IN $bookingIn)=0",
+        "(SELECT COUNT(*) FROM booking_slot WHERE booking_id IN $bookingIn AND resource_id<>$resId)=0"
+    )
+    $ownershipConditions += "(SELECT COUNT(*) FROM violation_record WHERE user_id IN $userIdIn OR booking_id IN $bookingIn)=$($violationIds.Count)"
+    $ownershipConditions += "(SELECT COUNT(*) FROM approval_record WHERE approver_id IN $userIdIn OR booking_id IN $bookingIn)=$($approvalIds.Count)"
+    $ownershipConditions += "(SELECT COUNT(*) FROM booking_slot WHERE resource_id=$resId OR booking_id IN $bookingIn)=$($slotIds.Count)"
+    $ownershipConditions += "(SELECT COUNT(*) FROM notification WHERE user_id IN $userIdIn)=$($notificationIds.Count)"
+    $ownershipConditions += "(SELECT COUNT(*) FROM blacklist WHERE user_id IN $userIdIn OR operator_id IN $userIdIn)=$($blacklistIds.Count)"
+    $ownershipConditions += "(SELECT COUNT(*) FROM operation_log WHERE user_id IN $userIdIn)=$($operationLogIds.Count)"
+    if ($violationIds.Count -gt 0) {
+        $ownershipConditions += "(SELECT COUNT(*) FROM violation_record WHERE id IN $violationIn AND booking_id IN $bookingIn AND user_id=$studId)=$($violationIds.Count)"
+    }
+    if ($approvalIds.Count -gt 0) {
+        $ownershipConditions += "(SELECT COUNT(*) FROM approval_record WHERE id IN $approvalIn AND booking_id IN $bookingIn AND approver_id=$adminId)=$($approvalIds.Count)"
+    }
+    if ($slotIds.Count -gt 0) {
+        $ownershipConditions += "(SELECT COUNT(*) FROM booking_slot WHERE id IN $slotIn AND booking_id IN $bookingIn AND resource_id=$resId)=$($slotIds.Count)"
+    }
+    if ($notificationIds.Count -gt 0) {
+        $ownershipConditions += "(SELECT COUNT(*) FROM notification WHERE id IN $notificationIn AND user_id IN $userIdIn)=$($notificationIds.Count)"
+    }
+    if ($blacklistIds.Count -gt 0) {
+        $ownershipConditions += "(SELECT COUNT(*) FROM blacklist WHERE id IN $blacklistIn AND user_id IN $userIdIn AND operator_id IS NULL)=$($blacklistIds.Count)"
+    }
+    if ($operationLogIds.Count -gt 0) {
+        $ownershipConditions += "(SELECT COUNT(*) FROM operation_log WHERE id IN $operationLogIn AND user_id IN $userIdIn)=$($operationLogIds.Count)"
+    }
+    $absenceConditions = @(
+        "(SELECT COUNT(*) FROM ``user`` WHERE $userCollisionWhere)=0",
+        "(SELECT COUNT(*) FROM resource_category WHERE parent_id=$categoryId OR $categoryCollisionWhere)=0",
+        "(SELECT COUNT(*) FROM resource WHERE category_id=$categoryId OR $resourceCollisionWhere)=0",
+        "(SELECT COUNT(*) FROM booking WHERE user_id IN $userIdIn OR resource_id=$resId OR $bookingCollisionWhere)=0",
+        "(SELECT COUNT(*) FROM violation_record WHERE user_id IN $userIdIn OR booking_id IN $bookingIn)=0",
+        "(SELECT COUNT(*) FROM approval_record WHERE approver_id IN $userIdIn OR booking_id IN $bookingIn)=0",
+        "(SELECT COUNT(*) FROM booking_slot WHERE resource_id=$resId OR booking_id IN $bookingIn)=0",
+        "(SELECT COUNT(*) FROM notification WHERE user_id IN $userIdIn)=0",
+        "(SELECT COUNT(*) FROM blacklist WHERE user_id IN $userIdIn OR operator_id IN $userIdIn)=0",
+        "(SELECT COUNT(*) FROM operation_log WHERE user_id IN $userIdIn)=0",
+        "(SELECT COUNT(*) FROM resource_time_rule WHERE resource_id=$resId)=0",
+        "(SELECT COUNT(*) FROM resource_closure WHERE resource_id=$resId)=0"
+    )
+    [void]$transaction.Add('SET @ownership_ok := IF((' + ($ownershipConditions -join ') AND (') + '), 1, 0)')
+    [void]$transaction.Add('SET @already_absent := IF((' + ($absenceConditions -join ') AND (') + '), 1, 0)')
+    if ($violationIds.Count -gt 0) { [void]$transaction.Add("DELETE FROM violation_record WHERE id IN $violationIn AND booking_id IN $bookingIn AND @ownership_ok=1") }
+    if ($approvalIds.Count -gt 0) { [void]$transaction.Add("DELETE FROM approval_record WHERE id IN $approvalIn AND booking_id IN $bookingIn AND @ownership_ok=1") }
+    if ($slotIds.Count -gt 0) { [void]$transaction.Add("DELETE FROM booking_slot WHERE id IN $slotIn AND booking_id IN $bookingIn AND @ownership_ok=1") }
+    [void]$transaction.Add("DELETE FROM booking WHERE ($bookingTupleWhere) AND @ownership_ok=1")
+    if ($notificationIds.Count -gt 0) { [void]$transaction.Add("DELETE FROM notification WHERE id IN $notificationIn AND user_id IN $userIdIn AND @ownership_ok=1") }
+    if ($blacklistIds.Count -gt 0) { [void]$transaction.Add("DELETE FROM blacklist WHERE id IN $blacklistIn AND user_id IN $userIdIn AND @ownership_ok=1") }
+    if ($operationLogIds.Count -gt 0) { [void]$transaction.Add("DELETE FROM operation_log WHERE id IN $operationLogIn AND user_id IN $userIdIn AND @ownership_ok=1") }
+    [void]$transaction.Add("DELETE FROM resource_time_rule WHERE resource_id=$resId AND id IN $ruleIn AND @ownership_ok=1")
+    [void]$transaction.Add("DELETE FROM resource WHERE id=$resId AND name=$resourceNameSql AND category_id=$categoryId AND description=$resourceDescriptionSql AND @ownership_ok=1")
+    [void]$transaction.Add("DELETE FROM resource_category WHERE id=$categoryId AND name=$categoryNameSql AND @ownership_ok=1")
+    [void]$transaction.Add("DELETE FROM ``user`` WHERE ($userTupleWhere) AND @ownership_ok=1")
+    [void]$transaction.Add('SET @cleanup_ok := IF((' + ($absenceConditions -join ') AND (') + '), 1, 0)')
+    [void]$transaction.Add("SET @finish_sql := IF((@ownership_ok=1 OR @already_absent=1) AND @cleanup_ok=1, 'COMMIT', 'ROLLBACK')")
+    [void]$transaction.Add('PREPARE t13_teardown_finish FROM @finish_sql')
+    [void]$transaction.Add('EXECUTE t13_teardown_finish')
+    [void]$transaction.Add('DEALLOCATE PREPARE t13_teardown_finish')
+    [void]$transaction.Add("SELECT CONCAT('T13TD:', @ownership_ok, ':', @already_absent, ':', @cleanup_ok)")
+    $transactionResult = Invoke-RootSql -File $composeFile -Query (($transaction -join ";`n") + ';')
+    $transactionLines = @($transactionResult -split "`r?`n")
+    $teardownCommitted = ($transactionLines -contains 'T13TD:1:0:1')
+    $teardownAlreadyClean = ($transactionLines -contains 'T13TD:0:1:1')
+    if (-not $teardownCommitted -and -not $teardownAlreadyClean) {
+        Set-Content -LiteralPath (Join-Path $Artifacts 'teardown-evidence.txt') -Value (@(
+            "scope: usernames=$($usernames -join ',') purposes=$($purposes -join ',') resourceId=$resId",
+            "preTotals(booking,user)=$preTotals",
+            'transaction: ROLLED BACK - ownership, complete absence, or cleanup condition failed',
+            'verdict: REFUSED / NO PARTIAL TEARDOWN COMMITTED'
+        ) -join "`r`n") -Encoding utf8NoBOM
+        Write-Warning 'REFUSED: transactional teardown rolled back after ownership or cleanup mismatch.'
+        return 2
+    }
 
     # Verify zero leftovers within scope.
-    $leftUsers  = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM ``user`` WHERE username IN $userIn").Trim()
-    $leftBook   = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM booking WHERE id IN $bookingIn").Trim()
-    $leftRes    = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource WHERE id = $resId AND name = '$resourceNameFromMap'").Trim()
-    $leftCat    = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_category WHERE id = $categoryId AND name = '$categoryNameFromMap'").Trim()
+    $leftUsers  = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM ``user`` WHERE $userCollisionWhere").Trim()
+    $leftBook   = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM booking WHERE user_id IN $userIdIn OR resource_id=$resId OR $bookingCollisionWhere").Trim()
+    $leftBookChildren = (Invoke-RootSql -File $composeFile -Query "SELECT (SELECT COUNT(*) FROM violation_record WHERE user_id IN $userIdIn OR booking_id IN $bookingIn), (SELECT COUNT(*) FROM approval_record WHERE approver_id IN $userIdIn OR booking_id IN $bookingIn), (SELECT COUNT(*) FROM booking_slot WHERE resource_id=$resId OR booking_id IN $bookingIn)").Trim()
+    $leftUserChildren = (Invoke-RootSql -File $composeFile -Query "SELECT (SELECT COUNT(*) FROM notification WHERE user_id IN $userIdIn), (SELECT COUNT(*) FROM blacklist WHERE user_id IN $userIdIn OR operator_id IN $userIdIn), (SELECT COUNT(*) FROM operation_log WHERE user_id IN $userIdIn)").Trim()
+    $leftRes    = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource WHERE category_id=$categoryId OR $resourceCollisionWhere").Trim()
+    $leftResourceChildren = (Invoke-RootSql -File $composeFile -Query "SELECT (SELECT COUNT(*) FROM resource_time_rule WHERE resource_id=$resId), (SELECT COUNT(*) FROM resource_closure WHERE resource_id=$resId)").Trim()
+    $leftCat    = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_category WHERE parent_id=$categoryId OR $categoryCollisionWhere").Trim()
     $postTotals = Invoke-RootSql -File $composeFile -Query 'SELECT (SELECT COUNT(*) FROM booking), (SELECT COUNT(*) FROM `user`)'
-    $ok = ($leftUsers -eq '0' -and $leftBook -eq '0' -and $leftRes -eq '0' -and $leftCat -eq '0')
+    $ok = ($leftUsers -eq '0' -and $leftBook -eq '0' -and $leftBookChildren -eq "0`t0`t0" -and
+        $leftUserChildren -eq "0`t0`t0" -and $leftRes -eq '0' -and $leftResourceChildren -eq "0`t0" -and $leftCat -eq '0')
 
     Set-Content -LiteralPath (Join-Path $Artifacts 'teardown-evidence.txt') -Value (@(
         "scope: usernames=$($usernames -join ',') purposes=$($purposes -join ',') resourceId=$resId",
         "preTotals(booking,user)=$preTotals",
         "postTotals(booking,user)=$postTotals",
-        "leftover users=$leftUsers leftover scoped bookings=$leftBook leftover demo resource=$leftRes leftover demo category=$leftCat",
-        "verdict: $(if ($ok) { 'TEARDOWN CLEAN (scope-limited)' } else { 'LEFTOVERS REMAIN - operator action required' })"
+        "transactionMarker=$(if ($teardownCommitted) { 'T13TD:1:0:1' } else { 'T13TD:0:1:1' })",
+        "leftover users=$leftUsers bookings=$leftBook bookingChildren=$leftBookChildren userChildren=$leftUserChildren resource=$leftRes resourceChildren=$leftResourceChildren category=$leftCat",
+        "verdict: $(if ($ok -and $teardownAlreadyClean) { 'TEARDOWN ALREADY CLEAN (idempotent no-op)' } elseif ($ok) { 'TEARDOWN CLEAN (transactional exact scope)' } else { 'POST-COMMIT LEFTOVERS - operator action required' })"
     ) -join "`r`n") -Encoding utf8NoBOM
     if (-not $ok) { return 1 }
     return 0

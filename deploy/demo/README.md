@@ -1,8 +1,10 @@
 # T13 Demo Fixture (ephemeral runtime, NOT a migration seed)
 
 > STATUS: **implementation contract-tested; real Demo NOT RUN.** No API
-> registration, SQL, browser or teardown runtime has executed. All demo evidence
-> remains DRAFT and `evidence-index.template.md` remains NOT RUN placeholders.
+> registration, fixture mutation, browser flow or populated-fixture teardown has
+> executed. Two repeated absent-scope MySQL no-op probes exercised only the
+> already-clean transaction path. All demo evidence remains DRAFT and
+> `evidence-index.template.md` remains NOT RUN placeholders.
 
 ## Offline contract check
 
@@ -12,7 +14,7 @@ pwsh deploy/demo/contract-tests.ps1
 
 The suite exercises only Plan and pre-I/O refusal paths, then statically checks
 the password/temporary-secret/journal/transactional-compensation/teardown/
-evidence contracts. The current suite passes 119 assertions. A PASS is not
+evidence contracts. The current suite passes 184 assertions. A PASS is not
 fixture attestation or Demo acceptance and does not complete tasks 6.1-6.4. The
 suite is also part of `deploy/verify/run.ps1 -Mode Check -Gate static`.
 
@@ -44,25 +46,32 @@ suite is also part of `deploy/verify/run.ps1 -Mode Check -Gate static`.
   After that all-zero preflight and still before mutation, it writes a non-secret
   `recovery-scope.json` containing only these deterministic names/purposes and
   counts; this is explicitly not an executable teardown map.
-* Teardown deletes children before parents (violation → approval → slot →
-  booking → notification/blacklist → time rule → closure → resource → users),
-  using EXACT username/purpose lists and the numeric resource id — no LIKE
-  wildcards, no database/volume drops, no foreign rows. A pre/post total-count
-  record plus leftover checks land in `teardown-evidence.txt`.
-* Before the first delete, Teardown requires distinct mapped booking/user ids and
-  verifies the current database still matches every destructive owner tuple:
-  user id+username, resource id+name+category, and booking id+purpose+student+
-  resource. A numeric but foreign/tampered map is refused with zero deletes.
+* Setup generates a 128-bit random ownership tag, records it in the non-secret
+  recovery scope/journal/map, and binds it to the created resource description.
+  Teardown requires the same owner, RunId, fixed role usernames, tag, description,
+  resource/category/time-rule tuples and booking tuples before any delete.
+* The map records exact IDs for violation, approval, slot, notification,
+  blacklist and operation-log children. Inside one SERIALIZABLE transaction,
+  Teardown locks every scoped range and requires the current scoped set to equal
+  the recorded ID set and owner tuples exactly. Any missing or additional child
+  rolls back. Only recorded child IDs are deleted, children before parents; an
+  unrecorded closure is refused rather than deleted. No LIKE wildcard,
+  database/volume drop or scope-wide child delete is used.
+* All SQL text values are encoded as UTF-8 hexadecimal data literals. Numeric IDs
+  are validated before interpolation. A pre/post total-count record plus leftover
+  checks land in `teardown-evidence.txt`.
 * Standalone Teardown requires an explicit fixture map via `-MapPath`; without
   it the mode is BLOCKED. The script never guesses the newest fixture scope.
 * Before the first mutation, Setup creates a non-secret
   `partial-fixture-journal.json`; after each successful entity creation it records
   the exact numeric id and deterministic owner tuple before the next setup phase.
   If Setup then fails without a complete map, `finally` revalidates every recorded
-  tuple and rejects unjournaled notification/blacklist or resource-child rows.
+  tuple, records exact booking-child IDs, and rejects unjournaled notification,
+  blacklist, operation-log, booking or resource-child rows.
   Its authoritative recheck and children-first deletes run in one SERIALIZABLE
   MySQL transaction with `FOR UPDATE` locks on parent rows and the complete
-  notification/blacklist/time-rule/closure ranges; any ownership/cleanup
+  notification/blacklist/operation-log/booking-child/time-rule/closure ranges;
+  any ownership/cleanup
   mismatch selects `ROLLBACK`, never a half-committed compensation.
 
 ## Generated passwords
@@ -71,8 +80,8 @@ suite is also part of `deploy/verify/run.ps1 -Mode Check -Gate static`.
   at Execute time. Passwords and login tokens are stored ONLY in a randomly
   named system-temp JSON for the same run; `finally` deletes it on every path
   and verifies deletion — a failed deletion fails the run with a rotation
-  instruction. Nothing secret is written into `fixture-map.json` (ids,
-  usernames, purposes, timestamps only) or any artifact.
+  instruction. Nothing secret is written into `fixture-map.json`; its random
+  ownership tag is a non-secret row-provenance marker, not a credential.
 * Standalone `StudentFlow` needs no fixture password: the T08 harness
   registers its own browser users.
 
@@ -101,9 +110,11 @@ suite is also part of `deploy/verify/run.ps1 -Mode Check -Gate static`.
 * Fixture attestation (OCR-5) is a template field only until an owner review.
 * If Setup fails after journaled rows exist but before `fixture-map.json`, the
   current `All`/`Setup` finally path can transactionally compensate only those
-  recorded and revalidated tuples. This design has passed offline source
+  recorded and revalidated parent/child IDs. This design has passed offline source
   contracts, and a no-business-write MySQL 8.0.40 probe confirmed the conditional
-  COMMIT/ROLLBACK marker mechanism; no real compensation run exists.
+  COMMIT/ROLLBACK marker mechanism. The full Teardown already-clean path also ran
+  twice against MySQL 8.0.40 and returned `T13TD:0:1:1`; neither probe created or
+  deleted business rows, and no real compensation/populated teardown run exists.
 * A hard process interruption, API response loss, or journal write failure in the
   gap after a mutation commits but before its tuple is persisted can still leave
   an unjournaled row. `recovery-scope.json` and exact namespace preflight preserve

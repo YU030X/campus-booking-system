@@ -26,7 +26,7 @@
 | restart persistence | `deploy/scripts/restart-persistence-check.ps1 -Execute` | stack healthy、已备份 | `deploy/artifacts/t13-restart-persistence-20260901-audited/` | API/MySQL/Redis healthy；数据/定义相同；未使用 `down`、`-v` 或删卷 | PASS：fingerprint identical；count diffs empty |
 | Redis outage | `deploy/scripts/redis-failure-check.ps1` | 生成 token、owner-scoped T08 fixture、T07/T12 wiring | `deploy/artifacts/t13-redis-outage-20260901-final/` | T07 409/43000/SYSTEM_BUSY、零 mutation；T12 MySQL fallback；Redis 恢复 | PASS：T07/T12 true；Redis recovered；exit 0 |
 | JMeter implementation contract | `deploy/jmeter/contract-tests.ps1`（亦由 static gate 调用） | PowerShell 7；无需 JMeter/Docker/HTTP | 合成 JTL、临时 metadata/report（默认清理） | 三轮模板、100/1/1、loopback/baseline/CSV 门、分类、元数据、证据链接、1/99、非零退出、隐私和 fail-closed 全部通过 | PASS：45 assertions；仅实现合同 |
-| Demo implementation contract | `deploy/demo/contract-tests.ps1`（亦由 static gate 调用） | PowerShell 7；无需 Docker/SQL/HTTP/E2E/browser | 临时 profiles/maps（默认清理） | owner/namespace/attestation 拒绝、零碰撞 preflight、非秘密增量 journal、SERIALIZABLE 事务内重验/range lock/完整 child+parent cleanup/rollback、owner-tuple teardown、secret finally、全 Draft evidence | PASS：119 assertions；仅实现合同 |
+| Demo implementation contract | `deploy/demo/contract-tests.ps1`（亦由 static gate 调用） | PowerShell 7；无需 Docker/SQL/HTTP/E2E/browser | 临时 profiles/maps（默认清理） | owner/RunId/固定角色/attestation 拒绝、零碰撞 preflight、随机 ownership tag 绑定、非秘密增量 journal、精确 child-ID 集、UTF-8 SQL 字面量、SERIALIZABLE 事务内重验/range lock/完整 child+parent cleanup/rollback、secret finally、全 Draft evidence | PASS：184 assertions；另有两次无业务写 `T13TD:0:1:1`；仅实现合同/空范围语法证据 |
 | image scan evidence contract | `deploy/scan/contract-tests.ps1`（亦由 static gate 调用） | PowerShell 7；无需 scanner/Docker/registry/advisory/network | 合成 Trivy/Grype reports/manifests（默认清理） | 覆盖路径/junction、hash、image ID/ref/可选 digest、报告结构、DB freshness、counts、decision、scanner exit 与有界日志凭据筛查的 fail-closed 分支 | PASS：28 assertions；仅验证器合同 |
 | local vulnerability scan | `deploy/scan/run.ps1 -Action Environment/Validate` | 已安装 Trivy/Grype、本地 advisory DB、API/edge 原始 JSON 和执行日志 | ignored scan bundle + normalized result | 两镜像、fresh DB、hash/image/count 一致、scanner exits 0、UNKNOWN/HIGH/CRITICAL 为零；SBOM 不计 | BLOCKED：无支持的本地 scanner+DB；未扫描 |
 | JMeter protected rounds | `deploy/jmeter/run.ps1` + `summarize.ps1` | valid seed、clean scope、JMeter 5.6.3、healthy Redis | XML JTL、metadata、report | protected same-slot 才能断言 1 success + 99 business conflict + 0 system/data/other errors；baseline/distinct 不套该断言 | 未执行/JMeter+fixture+history 阻塞 |
@@ -51,5 +51,5 @@
 - T13 integration/spec-sync 门禁已满足；change 仍因运行时与外部门禁保持 Draft。
 - 固定标签的远端刷新曾失败，但当前缓存镜像均有 RepoDigest，API/edge 已成功构建并运行；本机没有受支持的本地 scanner+advisory DB，漏洞扫描未执行。Docker Scout/SBOM 缓存不构成离线 CVE 证据。
 - Docker 四服务和 Redis outage 本地证据已采集；JMeter 5.6.3 未安装。
-- Demo Setup 在完整 fixture map 落盘前失败时仍缺自动补偿设计；owner review/attestation 前不得真实执行。
+- Demo Setup 的 journaled 范围已有事务补偿设计，但 mutation commit→journal write 的硬中断窗口仍需人工按 recovery scope 审核；owner review/attestation 前不得真实执行。
 - 不存在任何可发布的公共 URL、域名、TLS 证书或自动化云资源授权。
