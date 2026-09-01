@@ -2,7 +2,7 @@
 
 Date: 2026-09-01
 Branch: `codex/verify-and-deploy-system`  
-Implementation baseline: `924da16 fix: compensate partial Demo setup safely`
+Implementation baseline: `5bcc920 fix: bind Demo teardown to exact ownership`
 Worktree: `D:\Projects\project1_campus\target\worktrees\verify-and-deploy-system`  
 Status: **DRAFT / partially accepted; do not archive**
 OpenSpec apply progress: **24/34 tasks complete**
@@ -41,21 +41,22 @@ OpenSpec apply progress: **24/34 tasks complete**
   row-delta checks, non-zero JMeter exits, privacy and fail-closed inputs. It
   invoked no JMeter, Docker or HTTP request and is not a real three-round
   performance result.
-- Demo tasks 6.1-6.4 remain unchecked, but the authored harness now has a
-  119-assertion offline contract suite covering profile ownership/namespace/wait
+- Demo tasks 6.1-6.4 remain unchecked. The committed harness has a
+  184-assertion offline contract suite covering profile ownership/namespace/wait
   gates, loopback and attestation refusal, missing/invalid teardown maps,
-  32-byte RNG and temp-secret finally behavior, exact children-first teardown,
-  zero-collision preflight, pre-mutation recovery scope, tamper-resistant
-  owner-tuple teardown, incremental non-secret recovery journaling,
-  SERIALIZABLE parent/range locks, complete child+parent cleanup conditions,
-  conditional rollback, and all-Draft evidence. It invoked no Docker, SQL, HTTP,
-  E2E or browser action. A separate no-business-write MySQL 8.0.40 probe returned
-  `T13COMP:1:1`, proving the conditional transaction-control syntax only.
-- Demo hardening is committed through `86de80c`: Setup performs an exact
-  zero-collision preflight before mutation, writes a non-secret recovery scope
-  before mutation, and Teardown validates unique numeric IDs plus exact
-  user/resource/booking owner tuples before issuing any DELETE. It deliberately
-  refuses ambiguous cleanup instead of guessing ownership.
+  32-byte password RNG, 128-bit ownership-tag RNG, temp-secret finally behavior,
+  exact RunId/fixed-role binding, UTF-8 SQL literal encoding, zero-collision
+  preflight, pre-mutation recovery scope, incremental non-secret parent/child-ID
+  journaling, exact child-set teardown, SERIALIZABLE parent/range locks, complete
+  child+parent cleanup conditions, conditional rollback, and all-Draft evidence.
+  It invoked no Docker, SQL, HTTP, E2E or browser action. A separate
+  no-business-write MySQL 8.0.40 partial probe returned `T13COMP:1:1`; the full
+  already-clean path ran twice and returned `T13TD:0:1:1`. These prove only
+  transaction syntax/idempotency without fixture mutation.
+- Demo hardening is committed through `5bcc920`: Setup binds a random non-secret
+  ownership tag to resource.description/recovery/journal/map; full and partial
+  cleanup require each scoped child set to equal the exact recorded ID set and
+  owner tuple before deleting only those IDs. Additional/missing rows roll back.
 - Empty-database migration passes in
   `deploy/artifacts/t13-empty-migration-20260901-final/`: exact MySQL digest,
   two fresh databases, 12 tables, 34 keys, zero rows, identical fingerprints,
@@ -119,6 +120,34 @@ OpenSpec apply progress: **24/34 tasks complete**
   revalidates and locks journaled parent/child ranges, refuses unjournaled child
   rows, and rolls back any incomplete partial compensation. This is implementation
   hardening only; no real Setup/compensation/Demo was run.
+- T13 commit `f15538b`: refreshes this handoff for the committed partial-recovery
+  state. It contains no runtime or acceptance-status upgrade.
+- T13 commit `5bcc920`: fixes `All`-mode map sharing, binds Setup/Teardown to the
+  same RunId, owner, fixed role usernames and random resource ownership tag,
+  encodes all SQL text as UTF-8 hexadecimal data literals, and requires exact
+  recorded IDs for booking/user children. This is implementation hardening only;
+  no populated fixture or real Demo was run.
+
+## Latest Demo ownership-v2 batch
+
+- Commit `5bcc920` contains the full ownership-v2 implementation and truthful
+  README/matrix/tasks evidence. It passed PowerShell parsing, the 184/184 offline
+  Demo contract, the combined static gate, strict change validation, main-spec
+  validation 21/21 and `git diff --check` before commit.
+- Full Teardown is a single generated SERIALIZABLE transaction. It locks every
+  parent and scoped child range, requires owner/RunId/tag/tuple equality plus exact
+  child-ID set equality, deletes children before parents, verifies complete absence,
+  and emits `T13TD:<ownership>:<alreadyAbsent>:<cleanup>`.
+- Two independent security/runtime review rounds found and then verified fixes for
+  foreign violation/approval/slot/user-child deletion, SQL literal interpolation,
+  non-secret map provenance, `All`-mode MapPath scope, cross-run maps and role-name
+  substitution. No remaining external-row deletion path was identified in the
+  reviewed code; this is code-review evidence, not populated-fixture runtime proof.
+- The absent-scope MySQL 8.0.40 probe ran twice after the final fixes, performed no
+  business write, returned `T13TD:0:1:1`, and left every scoped group at zero.
+- The ownership tag is a non-secret row-provenance marker under the local operator
+  trust boundary, not a credential or protection against an attacker who already
+  controls both the database and artifacts.
 
 ## Remaining blockers — keep tasks unchecked
 
@@ -144,7 +173,8 @@ OpenSpec apply progress: **24/34 tasks complete**
    one SERIALIZABLE transaction, but no runtime recovery evidence exists. A hard
    interruption, API response loss, or journal-write failure after mutation commit
    can still leave an unjournaled row; exact recovery scope/manual review remains
-   the honest boundary until the owner accepts it.
+   the honest boundary until the owner accepts it. The populated full-Teardown path
+   is still unexecuted even though its static and already-clean paths pass.
 
 ## 2026-09-01 system integrity audit
 
@@ -182,8 +212,8 @@ OpenSpec apply progress: **24/34 tasks complete**
 - The T12 change still has one governance confirmation open: task 0.1 names the
   unreachable base `0e53b7e`, while the verified shared base is `2ffae9d`.
   Do not rewrite or check that task without explicit user confirmation.
-- The implementation baseline is `924da16`; the only follow-up change is this
-  handoff refresh. No push has been performed.
+- The committed implementation baseline is `5bcc920`; the only intended follow-up
+  change is this handoff refresh. No push has been performed.
 - The scan batch contains `run.ps1`, `contract-tests.ps1`, README guidance and an
   example manifest intended to validate owner-supplied offline Trivy/Grype JSON
   evidence. It has been parsed, contract-tested (28 assertions), integrated into
@@ -193,7 +223,7 @@ OpenSpec apply progress: **24/34 tasks complete**
   screening were fixed. It is committed but must not be cited as real scan
   evidence.
 - The JMeter report-schema/synthetic contract-test, optional TLS-overlay, and
-  119-assertion Demo compensation/teardown contract batches are committed.
+  184-assertion Demo ownership/compensation/teardown contract batches are committed.
   JMeter/Trivy/Grype/OSV-Scanner
   CLIs remain absent; Docker's local SBOM command was available and produced the
   inventories listed above, while Docker Scout lacks a locally verified advisory
@@ -201,14 +231,17 @@ OpenSpec apply progress: **24/34 tasks complete**
 
 ## Safe continuation order
 
-1. Obtain a supported local scanner plus fresh advisory database, or separately
+1. Obtain explicit owner attestation for the ephemeral Demo fixture before any
+   populated Setup/All execution. If granted, preserve the exact ignored map,
+   journal/evidence and manual screenshot review; otherwise tasks 6.1-6.4 stay Draft.
+2. Obtain a supported local scanner plus fresh advisory database, or separately
    authorize a controlled network-backed scanner/database workflow, before any
    real vulnerability claim. Validate both API/edge evidence bundles with
    `deploy/scan/run.ps1`; do not substitute SBOM or synthetic contracts.
-2. Obtain JMeter plus owner-provided historical/fixture artifacts before any
+3. Obtain JMeter plus owner-provided historical/fixture artifacts before any
    concurrency execution. Never fabricate weakened migrations or mock results.
-3. Obtain the ApprovalBrowser owner contract before executing that lane.
-4. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
+4. Obtain the ApprovalBrowser owner contract before executing that lane.
+5. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
    evidence; rerun both strict OpenSpec validations and `git diff --check`.
-5. Sync/archive only after every required local gate is complete. External
+6. Sync/archive only after every required local gate is complete. External
    acceptance remains a separate authorization gate.
