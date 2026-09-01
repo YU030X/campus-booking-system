@@ -116,7 +116,7 @@ docker compose --env-file .env down                    # volumes preserved
 | `evidence/verification-matrix.md` | local/external verification gates, exact commands, evidence paths, pass criteria, and current blockers | DRAFT, local evidence in progress |
 | `demo/profile.example.json` | ephemeral demo fixture profile template (loopback, env NAMES only, publicDenied) | authored, never run |
 | `demo/run.ps1` | Setup/StudentFlow/Teardown/All; RNG passwords in verified temp secret file; scope-limited teardown; EPHEMERAL-SETUP labeling | authored, never run |
-| `demo/contract-tests.ps1` | offline Plan/refusal plus profile/secret/teardown/evidence contract suite; no Docker/SQL/HTTP/E2E/browser | PASS: 70 assertions; no real Demo |
+| `demo/contract-tests.ps1` | offline Plan/refusal plus profile/secret/teardown/evidence contract suite; no Docker/SQL/HTTP/E2E/browser | PASS: 74 assertions; no real Demo |
 | `demo/evidence-index.template.md` | requirement→artifact mapping; all NOT RUN/DRAFT placeholders | template |
 | `demo/README.md` | ephemeral-vs-seed contract, safety, generated passwords, Draft evidence, blockers | planning doc |
 | `artifacts/` | raw run evidence; git-ignored except its `.gitignore` | contains local backend/frontend/config/API/browser evidence |

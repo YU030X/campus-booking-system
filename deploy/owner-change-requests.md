@@ -72,7 +72,9 @@ or planning form. The offline contract suite covers only pre-I/O refusal,
 secret-lifecycle and exact-scope teardown structure. Owner review must also
 resolve or accept the recovery design for a Setup failure that occurs after
 some rows are created but before the complete `fixture-map.json` is written;
-without the map, automatic finally teardown intentionally cannot guess scope.
+the runner now preserves an exact non-secret pre-mutation `recovery-scope.json`
+and intentionally performs no guessed delete, but automatic compensation still
+requires owner review before attestation.
 
 ## OCR-8 (approval owners): deterministic approval-browser fixture + approved command missing
 

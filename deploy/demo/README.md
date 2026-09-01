@@ -40,6 +40,9 @@ also part of `deploy/verify/run.ps1 -Mode Check -Gate static`.
 * Before its first mutation, Setup queries the exact three usernames, category
   name, resource name and two purpose strings and requires the whole RunId scope
   to be empty. A retry/collision is refused for recovery review, never adopted.
+  After that all-zero preflight and still before mutation, it writes a non-secret
+  `recovery-scope.json` containing only these deterministic names/purposes and
+  counts; this is explicitly not an executable teardown map.
 * Teardown deletes children before parents (violation → approval → slot →
   booking → notification/blacklist → time rule → closure → resource → users),
   using EXACT username/purpose lists and the numeric resource id — no LIKE
@@ -88,7 +91,7 @@ also part of `deploy/verify/run.ps1 -Mode Check -Gate static`.
 * Fixture attestation (OCR-5) is a template field only until an owner review.
 * If Setup fails after creating rows but before `fixture-map.json` is written,
   the current `All`-mode finally block has no complete map and cannot safely
-  auto-compensate those partial rows. Owner review must resolve or explicitly
-  accept a progressive recovery-map/compensation design before attestation or a
-  real Demo run; the exact namespace preflight prevents silent reuse on retry,
-  and the offline suite intentionally does not hide the remaining cleanup gap.
+  auto-compensate those partial rows. It performs no guessed delete and points
+  the operator at `recovery-scope.json`; owner review must resolve or explicitly
+  accept the remaining compensation design before attestation or a real Demo
+  run. The exact namespace preflight prevents silent reuse on retry.

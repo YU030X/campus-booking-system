@@ -198,13 +198,19 @@ try {
     Assert-Contract ($setupStart -ge 0 -and $setupEnd -gt $setupStart) 'Setup source block must be locatable'
     $setup = $source.Substring($setupStart, $setupEnd - $setupStart)
     $preflightGateIndex = $setup.IndexOf('demo RunId namespace is not empty', [StringComparison]::Ordinal)
+    $recoveryScopeWriteIndex = $setup.IndexOf('Set-Content -LiteralPath $recoveryScopePath', [StringComparison]::Ordinal)
     $firstApiWriteIndex = $setup.IndexOf('Invoke-Api -Method Post -Url "$beUrl/api/v1/auth/register"', [StringComparison]::Ordinal)
     Assert-Contract ($preflightGateIndex -ge 0 -and $firstApiWriteIndex -gt $preflightGateIndex) 'exact namespace preflight must precede the first API mutation'
+    Assert-Contract ($recoveryScopeWriteIndex -gt $preflightGateIndex -and $recoveryScopeWriteIndex -lt $firstApiWriteIndex) 'non-secret recovery scope must be written after preflight and before the first mutation'
     Assert-Contract ($setup -match 'WHERE username IN \$expectedUserIn') 'Setup preflight must check exact usernames'
     Assert-Contract ($setup -match 'resource_category WHERE name=''\$categoryName''') 'Setup preflight must check the exact category name'
     Assert-Contract ($setup -match 'resource WHERE name=''\$resourceName''') 'Setup preflight must check the exact resource name'
     Assert-Contract ($setup -match 'booking WHERE purpose IN \$expectedPurposeIn') 'Setup preflight must check the two exact purposes'
     Assert-Contract ($setup -notmatch '(?im)Invoke-RootSql[^\r\n]*\bLIKE\b') 'Setup preflight must not use LIKE scopes'
+    $recoveryStart = $setup.IndexOf('$recoveryScope = [ordered]@{', [StringComparison]::Ordinal)
+    Assert-Contract ($recoveryStart -ge 0 -and $recoveryScopeWriteIndex -gt $recoveryStart) 'recovery scope source block must be locatable'
+    $recoveryBlock = $setup.Substring($recoveryStart, $recoveryScopeWriteIndex - $recoveryStart)
+    Assert-Contract ($recoveryBlock -notmatch '(?i)\b(password|token|secret)\b') 'recovery scope must not contain credential fields'
 
     $mapStart = $source.IndexOf('$map = [ordered]@{', [StringComparison]::Ordinal)
     $mapEnd = $source.IndexOf('Set-Content -LiteralPath $createdMapPath', $mapStart, [StringComparison]::Ordinal)
@@ -252,6 +258,7 @@ try {
     Assert-Contract ($evidence -match 'Approval browser flow.*BLOCKED \(OCR-8\)') 'approval browser row must remain OCR-8 blocked'
     Assert-Contract ($evidence -match 'REQUIRES MANUAL VISUAL PII REVIEW') 'screenshot evidence must require manual PII review'
     Assert-Contract ($evidence -notmatch '(?m)^\|[^\r\n]*\|\s*PASS\s*\|') 'no evidence row may be pre-marked PASS'
+    Assert-Contract ($source -match 'Setup may have failed before the complete fixture map; no automatic delete was attempted') 'All-mode finally must surface the pre-map recovery scope without guessing deletes'
 
     Write-Output "DEMO CONTRACT TESTS PASS - assertions=$assertions; no Docker, SQL, HTTP, E2E, or browser action was invoked."
     exit 0

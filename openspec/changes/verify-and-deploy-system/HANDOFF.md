@@ -35,11 +35,12 @@ OpenSpec apply progress: **24/34 tasks complete**
   invoked no JMeter, Docker or HTTP request and is not a real three-round
   performance result.
 - Demo tasks 6.1-6.4 remain unchecked, but the authored harness now has a
-  70-assertion offline contract suite covering profile ownership/namespace/wait
+  74-assertion offline contract suite covering profile ownership/namespace/wait
   gates, loopback and attestation refusal, missing/invalid teardown maps,
   32-byte RNG and temp-secret finally behavior, exact children-first teardown,
-  zero-collision preflight, tamper-resistant owner-tuple teardown, and all-Draft
-  evidence. It invoked no Docker, SQL, HTTP, E2E or browser action.
+  zero-collision preflight, pre-mutation recovery scope, tamper-resistant
+  owner-tuple teardown, and all-Draft evidence. It invoked no Docker, SQL, HTTP,
+  E2E or browser action.
 - Empty-database migration passes in
   `deploy/artifacts/t13-empty-migration-20260901-final/`: exact MySQL digest,
   two fresh databases, 12 tables, 34 keys, zero rows, identical fingerprints,
@@ -109,7 +110,8 @@ OpenSpec apply progress: **24/34 tasks complete**
 5. Demo fixture owner attestation and execution remain absent; tasks 6.1-6.4
    stay Draft. Additionally, Setup can create partial rows before the complete
    fixture map exists; its current finally block cannot safely auto-compensate
-   that pre-map failure without a reviewed progressive recovery design.
+   that pre-map failure without a reviewed compensation design. The runner now
+   preserves a non-secret exact recovery scope and never guesses a delete.
 
 ## 2026-09-01 system integrity audit
 

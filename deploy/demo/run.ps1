@@ -213,6 +213,7 @@ function New-DemoPassword {
 $secretFile = $null
 $secretCleanupFailed = $false
 $createdMapPath = (Join-Path $Artifacts 'fixture-map.json')
+$recoveryScopePath = (Join-Path $Artifacts 'recovery-scope.json')
 $overall = 0
 
 function Save-SecretFile {
@@ -263,6 +264,30 @@ function Invoke-DemoSetup {
         Write-Warning 'REFUSED: demo RunId namespace is not empty; recover/review the exact prior scope before retrying.'
         return 2
     }
+
+    # Persist a non-secret recovery scope before the first mutation. This is not
+    # an executable teardown map (ids do not exist yet), but it prevents an
+    # operator from guessing which deterministic names/purposes may need review
+    # if Setup fails before fixture-map.json is complete.
+    $recoveryScope = [ordered]@{
+        runId = $RunId
+        fixtureOwner = $fixtureOwner
+        userPrefix = $userPrefix
+        usernames = $expectedUsernames
+        purposePrefix = $purposePrefix
+        purposes = @("${purposePrefix}pending", "${purposePrefix}past-confirmed")
+        categoryName = $categoryName
+        resourceName = $resourceName
+        preflightCounts = [ordered]@{
+            users = $existingUsers
+            category = $existingCategory
+            resource = $existingResource
+            bookings = $existingBookings
+        }
+        status = 'PRE-MUTATION SCOPE ONLY - NOT A TEARDOWN MAP OR ACCEPTANCE EVIDENCE'
+        createdAt = (Get-Date).ToString('o')
+    }
+    Set-Content -LiteralPath $recoveryScopePath -Value ($recoveryScope | ConvertTo-Json -Depth 5) -Encoding utf8NoBOM
 
     # 2) Register minimal users via the local API (no PII: optional fields null).
     $users = [ordered]@{}
@@ -402,6 +427,7 @@ function Invoke-DemoSetup {
         pastWindow = [ordered]@{ start = $pastStart; end = $pastEnd }
         noShowState = $noShowState
         t08SeedReference = $seedPath
+        recoveryScopeArtifact = 'recovery-scope.json'
         createdAt = (Get-Date).ToString('o')
     }
     Set-Content -LiteralPath $createdMapPath -Value ($map | ConvertTo-Json -Depth 6) -Encoding utf8NoBOM
@@ -660,6 +686,9 @@ finally {
             Write-Warning ("finally teardown raised: {0}" -f $_.Exception.Message)
             if ($overall -eq 0) { $overall = 1 }
         }
+    } elseif ($Mode -eq 'All' -and (Test-Path -LiteralPath $recoveryScopePath)) {
+        Write-Warning ("finally: Setup may have failed before the complete fixture map; no automatic delete was attempted. Review exact non-secret recovery scope: {0}" -f $recoveryScopePath)
+        if ($overall -eq 0) { $overall = 1 }
     }
 }
 

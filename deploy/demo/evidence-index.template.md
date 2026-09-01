@@ -7,6 +7,7 @@
 | # | Requirement slice | Evidence artifact (run-relative) | Status |
 |---|---|---|---|
 | 1 | Deterministic fixture creation (users/category/resource/rule/pending booking) | `<fixture-map.json>` | NOT RUN / DRAFT |
+| 1a | Pre-mutation exact recovery scope (names/purposes + all-zero preflight only; never a teardown map) | `<recovery-scope.json>` | NOT RUN / DRAFT |
 | 2 | Owner seed reference inspected only (T08 seed.sql, never executed because it is destructive) | `<setup log entry in fixture-map.createdAt only>` | NOT RUN / DRAFT |
 | 3 | PENDING booking via student API | `<fixture-map.json>.pendingBookingId` | NOT RUN / DRAFT |
 | 4 | No-show/violation state via OWNER scan (past CONFIRMED seed labeled EPHEMERAL-SETUP-NOT-ACCEPTANCE-EVIDENCE) | `<fixture-map.json>.noShowState` | NOT RUN / DRAFT |
