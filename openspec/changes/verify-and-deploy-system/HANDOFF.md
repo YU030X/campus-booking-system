@@ -4,7 +4,7 @@ Date: 2026-09-01
 Branch: `codex/verify-and-deploy-system`  
 Worktree: `D:\Projects\project1_campus\target\worktrees\verify-and-deploy-system`  
 Status: **DRAFT / partially accepted; do not archive**
-OpenSpec apply progress: **14/34 tasks complete**
+OpenSpec apply progress: **20/34 tasks complete**
 
 ## Completed and verified
 
@@ -17,8 +17,31 @@ OpenSpec apply progress: **14/34 tasks complete**
 - Frontend clean install/build passes. Evidence:
   `deploy/artifacts/verify-frontend-t13-frontend-pass/`.
 - Compose config validation passes with safe non-interpolated evidence:
-  `deploy/artifacts/verify-compose-config-local-compose-config/`. This does not
-  prove daemon runtime or container health.
+  `deploy/artifacts/verify-compose-config-local-compose-config/`.
+- API/edge were rebuilt from the current checkout using cached fixed bases;
+  `deploy/artifacts/t13-image-build-20260901-current/` records base RepoDigests,
+  non-root users and exit 0. All four Compose services are healthy; only edge is
+  published, on loopback `127.0.0.1:18080`.
+- Empty-database migration passes in
+  `deploy/artifacts/t13-empty-migration-20260901-final/`: exact MySQL digest,
+  two fresh databases, 12 tables, 34 keys, zero rows, identical fingerprints,
+  complete tool/time/HEAD metadata and exit 0.
+- Backup/restore passes in
+  `deploy/artifacts/t13-backup-restore-20260901-nonzero/`: isolated restore,
+  identical definitions/checksums, booking 1→1 and slot rows 2→2 with matching
+  aggregates, and 2.131 seconds within the explicit 14,400-second RTO;
+  RPO=24 hours and exit 0 are recorded.
+- Restart persistence passes in
+  `deploy/artifacts/t13-restart-persistence-20260901-audited/`: API/MySQL/Redis
+  return healthy, schema fingerprint is identical, row-count diffs are empty,
+  and volumes are preserved.
+- Redis outage passes in `deploy/artifacts/t13-redis-outage-20260901-final/`:
+  T07 returns 409/code43000/SYSTEM_BUSY with zero mutation, T12 availability
+  returns 200/code0/data from MySQL fallback with zero mutation, and Redis
+  recovers. Generated credentials remained in memory and fixture cleanup ran.
+- Local Nginx/runtime evidence in `deploy/artifacts/t13-runtime-current-20260901/`
+  covers SPA/deep route 200, API proxy 401, security headers, 3 MiB body→413,
+  paused upstream→504, and the five non-secret runtime feature flags.
 - API integration executes the fixed 37-class inventory and passes 195/195:
   `deploy/artifacts/e2e-ApiIntegration-t13-api-integration-pass/`.
 - StudentBrowser passes 15/15 in Chrome 152:
@@ -42,26 +65,19 @@ OpenSpec apply progress: **14/34 tasks complete**
 
 ## Remaining blockers — keep tasks unchecked
 
-1. The user selected Docker as the temporary backend runtime. The static Compose
-   contract resolves successfully (`mysql`, `redis`, `api`, `edge`), but the
-   Docker Desktop Linux daemon is still unavailable. A real `docker desktop
-   start` attempt on 2026-09-01 did not create `dockerDesktopLinuxEngine` or the
-   backend/diagnostic pipes. Error-level logs show Docker Desktop's remote policy
-   request to Docker Hub failing through the configured local proxy
-   `127.0.0.1:7897` with `TLS connect ... EOF`. Therefore image builds/digests,
-   Compose up/health, empty migration, backup/restore, restart persistence,
-   Redis outage, and container scans remain NOT RUN.
-2. JMeter 5.6.3 is absent. The vulnerable-baseline, unique-index-only, valid
+1. JMeter 5.6.3 is absent. The vulnerable-baseline, unique-index-only, valid
    seed, and 100-row distinct fixture/history artifacts are also absent
    (OCR-5/6/7). No three-round performance claim exists.
-3. ApprovalBrowser lacks an owner-attested deterministic fixture and approved
+2. ApprovalBrowser lacks an owner-attested deterministic fixture and approved
    executable (OCR-8). Direct StudentBrowser evidence does not satisfy the
    approval-path half of task 2.4.
-4. Image tag-to-digest pairs remain unresolved (OCR-4).
-5. No host/domain, DNS ownership, TLS mechanism, credentials, or external
+3. Remote vulnerability/dependency scanning is not run. Fixed local base
+   RepoDigests and application image IDs are recorded, but no external scanner
+   result is claimed.
+4. No host/domain, DNS ownership, TLS mechanism, credentials, or external
    deployment authorization exists (OCR-2). Tasks 8.1-8.3 remain blocked and no
    public URL/TLS claim is allowed.
-6. Demo fixture owner attestation and execution remain absent; tasks 6.1-6.4
+5. Demo fixture owner attestation and execution remain absent; tasks 6.1-6.4
    stay Draft.
 
 ## 2026-09-01 system integrity audit
@@ -71,7 +87,10 @@ OpenSpec apply progress: **14/34 tasks complete**
   main-spec validation 21/21, and `git diff --check` all have passing evidence.
 - `docker compose --env-file deploy/.env config --quiet` passes when invoked
   from the correct deployment directory; the resolved services are exactly
-  `mysql`, `redis`, `api`, and `edge`. This is configuration evidence only.
+  `mysql`, `redis`, `api`, and `edge`.
+- The current-checkout API/edge images and cached MySQL/Redis images form a
+  healthy four-service local stack. API/MySQL/Redis remain unexposed; edge is
+  loopback-only.
 - `deploy/.env` is ignored and untracked; generated artifacts remain ignored.
 - The Docker profile explicitly enables Redis and availability cache. Operation
   log, notifications, and statistics retain their independent default-false
@@ -99,17 +118,10 @@ OpenSpec apply progress: **14/34 tasks complete**
 
 ## Safe continuation order
 
-1. Restore the local proxy listening on `127.0.0.1:7897`, or correct/clear the
-   Docker Desktop proxy setting, then restart Docker Desktop. Do not publish or
-   upload the diagnostic bundle.
-2. Once `docker version` reports a server, use Docker/Compose as the temporary
-   backend runtime and run the reusable gates from `deploy/verify/run.ps1`;
-   preserve each unique run directory. If required images are not cached, obtain
-   explicit authorization before contacting an external registry.
-3. Obtain JMeter plus owner-provided historical/fixture artifacts before any
+1. Obtain JMeter plus owner-provided historical/fixture artifacts before any
    concurrency execution. Never fabricate weakened migrations or mock results.
-4. Obtain the ApprovalBrowser owner contract before executing that lane.
-5. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
+2. Obtain the ApprovalBrowser owner contract before executing that lane.
+3. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
    evidence; rerun both strict OpenSpec validations and `git diff --check`.
-6. Sync/archive only after every required local gate is complete. External
+4. Sync/archive only after every required local gate is complete. External
    acceptance remains a separate authorization gate.

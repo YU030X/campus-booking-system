@@ -1,9 +1,7 @@
 # T13 Recovery & Deployment Runbook
 
-> STATUS: **planning artifact** — every command below is documented for the
-> apply phase; none has been executed from this branch yet. Companion scripts
-> exist under `deploy/scripts/` but are also unexecuted. tasks 5.1–5.5 remain
-> unchecked by design until real runs produce raw evidence linked here.
+> STATUS: **partially executed** — empty migration, backup/restore and restart
+> persistence and Redis outage have passing local evidence.
 
 Scope: local/container evidence lanes only. Public/external recovery actions
 require explicit user authorization (tasks 8.1–8.2) before any run.
@@ -12,10 +10,10 @@ require explicit user authorization (tasks 8.1–8.2) before any run.
 
 | Lane | Script | Proves | Status |
 |---|---|---|---|
-| Empty migration | `scripts/empty-migration-check.ps1` | V001–V005 on two throwaway MySQL8 containers produce identical 12-table InnoDB/utf8mb4 seed-free schemas with every DDL-declared key — PRIMARY (as index `PRIMARY`, non-unique), UNIQUE and plain KEY — matched exactly | authored, not run |
-| Backup / restore | `scripts/backup-restore-check.ps1` | consistent dump (`--single-transaction`) restores into an isolated random DB with exact 12-table contract and full normalized definitions matching | authored, not run |
-| Restart persistence | `scripts/restart-persistence-check.ps1` | MySQL volume data + schema survive `restart` or stop+recreate without volume loss; plan mode needs no secret | authored, not run |
-| Redis failure | `scripts/redis-failure-check.ps1` | T07 fail-closed plus T12 live MySQL fallback, zero mutation, latency, and Redis recovery | authored, not run; Docker stack/token required |
+| Empty migration | `scripts/empty-migration-check.ps1` | V001–V005 on two throwaway MySQL8 containers produce identical 12-table InnoDB/utf8mb4 seed-free schemas with all declared keys | PASS: `t13-empty-migration-20260901-final` |
+| Backup / restore | `scripts/backup-restore-check.ps1` | consistent dump restores into an isolated DB with matching definitions/checksums/aggregates and RTO comparison | PASS: `t13-backup-restore-20260901-nonzero` |
+| Restart persistence | `scripts/restart-persistence-check.ps1` | schema/count identity and health across volume-preserving restart | PASS: `t13-restart-persistence-20260901-audited` |
+| Redis failure | `scripts/redis-failure-check.ps1` | T07 fail-closed plus T12 live MySQL fallback, zero mutation, latency, and Redis recovery | PASS: `t13-redis-outage-20260901-final` |
 
 Common rules: loopback/private endpoints only; run-id scoped containers,
 volumes and artifacts; evidence written to `deploy/artifacts/<run-id>/`
@@ -44,14 +42,15 @@ required: mysqldump/mysql authenticate inside the container via
 `MYSQL_PWD="${MYSQL_ROOT_PASSWORD}"`.
 
 ```powershell
-pwsh deploy/scripts/backup-restore-check.ps1
+pwsh deploy/scripts/backup-restore-check.ps1 `
+  -RpoAssumption '24 hours' -RtoAssumption '4 hours' -RtoSeconds 14400
 ```
 
 Flow: consistent dump inside container → `docker cp` to artifacts (sha256
 recorded) → create random isolated DB `t13_restore_*` → replay dump → compare
 table sets, per-table checksums, unique-index definitions, booking/booking_slot
-row counts and id aggregates → record measured restore seconds. RPO/RTO are
-operator-owned fields left blank in `result.json`.
+row counts and id aggregates → record measured restore seconds and assert it is
+within the numeric RTO threshold. RPO/RTO remain operator-owned inputs.
 Guarantees: source schema and named volumes are never dropped; cleanup removes
 only the restore DB and remote temp dump.
 
@@ -111,15 +110,17 @@ restart plus a `redis-cli ping` recovery gate.
 
 ## RPO / RTO operator fields
 
-Fill after real drill runs; numbers come from `result.json` measured values and
-operator judgment — do not invent values before evidence exists.
+Current local drill assumptions are RPO 24 hours and RTO 4 hours; the measured
+restore was 2.131 seconds and passed the 14,400-second threshold; the run restored
+one booking and two slot rows with matching aggregates. These are local exercise
+assumptions, not a production SLA.
 
 | Field | Value owner | Evidence link |
 |---|---|---|
-| Acceptable data-loss window (RPO assumption) | operator | `<link artifacts/run-*/result.json>` |
-| Measured restore duration (lane B) | auto | `<link artifacts/run-*/result.json>` |
-| Acceptable recovery window (RTO assumption) | operator | `<same>` |
-| Restart persistence proof (lane C) | auto+operator review | `<link artifacts/run-*/post-state.txt>` |
+| Acceptable data-loss window (RPO assumption) | operator | `artifacts/t13-backup-restore-20260901-nonzero/result.json` (24 hours) |
+| Measured restore duration (lane B) | auto | same result (2.131 seconds) |
+| Acceptable recovery window (RTO assumption) | operator | same result (4 hours / 14400 seconds) |
+| Restart persistence proof (lane C) | auto+operator review | `artifacts/t13-restart-persistence-20260901-audited/post-state.txt` |
 
 ## Stop conditions (halt and request owners)
 
@@ -134,4 +135,7 @@ operator judgment — do not invent values before evidence exists.
 
 | Run | Lane | Artifacts dir | Verdict |
 |---|---|---|---|
-| _none yet_ | — | — | nothing executed |
+| `t13-empty-migration-20260901-final` | empty migration | `deploy/artifacts/t13-empty-migration-20260901-final/` | PASS |
+| `t13-backup-restore-20260901-nonzero` | backup/restore | `deploy/artifacts/t13-backup-restore-20260901-nonzero/` | PASS |
+| `t13-restart-persistence-20260901-audited` | restart persistence | `deploy/artifacts/t13-restart-persistence-20260901-audited/` | PASS |
+| `t13-redis-outage-20260901-final` | Redis outage | `deploy/artifacts/t13-redis-outage-20260901-final/` | PASS |

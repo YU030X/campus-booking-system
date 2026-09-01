@@ -4,7 +4,8 @@
     T13 lane B: consistent backup of the local compose MySQL, restore into a
     random isolated database, and evidence-graded comparison.
 .DESCRIPTION
-    STATIC PLAN - never executed yet (tasks.md 5.2 stays unchecked until real run).
+    Reusable local verification lane; a run is evidence only when its recorded
+    result exits zero.
 
     Guarantees by design:
       * mysqldump --single-transaction (consistent snapshot) executed INSIDE the
@@ -23,8 +24,8 @@
         covers FULL normalized information_schema definitions (tables/columns/
         indexes), plus representative evidence retained: CHECKSUM TABLE diffs,
         booking / booking_slot row counts and id aggregates.
-      * Records measured restore elapsed seconds plus operator-fill RPO/RTO
-        fields (placeholders - humans own those assumptions).
+      * Records measured restore elapsed seconds plus explicit operator-supplied
+        RPO/RTO assumptions; empty or placeholder assumptions are refused.
     Exit codes: 0 pass | 2 verification/assertion failure | 3 blocked (no
     running local stack); unexpected errors abort non-zero.
 #>
@@ -34,15 +35,33 @@ param(
     [string]$Service = 'mysql',
     [string]$SourceDb = 'booking_db',
     [string]$ArtifactRoot = '',
-    [string]$RunId = ('run-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    [string]$RunId = ('run-' + (Get-Date -Format 'yyyyMMdd-HHmmss')),
+    [string]$RpoAssumption = '',
+    [string]$RtoAssumption = '',
+    [double]$RtoSeconds = 0
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$startedAt = (Get-Date).ToString('o')
 
 # RunId feeds container paths, artifact paths and shell payloads: strictly bound.
 if ($RunId -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$') {
     Write-Warning ("REFUSED: RunId '{0}' fails ^[A-Za-z0-9][A-Za-z0-9_-]{{0,63}}$" -f $RunId)
+    exit 2
+}
+
+function Test-ExplicitOperatorAssumption {
+    param([string]$Name, [string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value) -or $Value -match '(?i)<[^>]*>|placeholder|operator\s+fills|^\s*(tbd|todo|n/?a)\s*$') {
+        Write-Warning ("REFUSED: {0} must be a non-empty explicit operator assumption, not a placeholder" -f $Name)
+        exit 2
+    }
+}
+Test-ExplicitOperatorAssumption -Name 'RpoAssumption' -Value $RpoAssumption
+Test-ExplicitOperatorAssumption -Name 'RtoAssumption' -Value $RtoAssumption
+if ($RtoSeconds -le 0) {
+    Write-Warning 'REFUSED: RtoSeconds must be a positive numeric threshold'
     exit 2
 }
 
@@ -51,6 +70,10 @@ if (-not $ArtifactRoot) { $ArtifactRoot = (Resolve-Path (Join-Path $PSScriptRoot
 New-Item -ItemType Directory -Path $ArtifactRoot -Force | Out-Null
 $Artifacts = Join-Path $ArtifactRoot $RunId
 New-Item -ItemType Directory -Path $Artifacts -Force | Out-Null
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$gitHead = (& git -C $repoRoot rev-parse HEAD | Select-Object -First 1)
+$dockerClientVersion = (& docker version --format '{{.Client.Version}}' | Select-Object -First 1)
+$dockerServerVersion = (& docker version --format '{{.Server.Version}}' | Select-Object -First 1)
 
 $ExpectedTables = @('user','resource_category','resource','resource_time_rule','resource_closure',
     'booking','booking_slot','approval_record','violation_record','blacklist',
@@ -86,6 +109,8 @@ if (-not $cid) {
     Write-Warning "BLOCKED: service '$Service' not running for $ComposeFile - start the local stack first"
     exit 3
 }
+$sourceImageId = (& docker inspect --format '{{.Image}}' $cid | Select-Object -First 1)
+$sourceImageRepoDigests = @(& docker image inspect $sourceImageId --format '{{range .RepoDigests}}{{println .}}{{end}}') | Where-Object { $_ }
 
 # All client invocations authenticate INSIDE the container by exporting
 # MYSQL_PWD from the container's own MYSQL_ROOT_PASSWORD; query text rides an
@@ -98,13 +123,25 @@ function Invoke-MysqlExec {
     return ($out -join "`n")
 }
 
-$results = [ordered]@{ runId = $RunId; sourceDb = $SourceDb; overallPass = $true }
+$results = [ordered]@{
+    runId = $RunId
+    startedAt = $startedAt
+    repositoryHead = $gitHead
+    workingDirectory = $repoRoot
+    powershellVersion = $PSVersionTable.PSVersion.ToString()
+    dockerClientVersion = $dockerClientVersion
+    dockerServerVersion = $dockerServerVersion
+    sourceImageId = $sourceImageId
+    sourceImageRepoDigests = @($sourceImageRepoDigests)
+    sourceDb = $SourceDb
+    overallPass = $true
+}
 try {
     # ---- Consistent dump inside the container ---------------------------------
     # Single-quoted PS format string keeps ${MYSQL_ROOT_PASSWORD} literal for the
     # container shell; {0}/{1} are regex-validated values only.
     $remoteDump = "/tmp/t13dump-$RunId.sql"
-    $dumpPayload = 'MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" exec mysqldump -u root --single-transaction --quick --routines --triggers --databases {0} > {1}' -f $SourceDb, $remoteDump
+    $dumpPayload = 'MYSQL_PWD="${{MYSQL_ROOT_PASSWORD}}" exec mysqldump -u root --single-transaction --quick --routines --triggers --databases {0} > {1}' -f $SourceDb, $remoteDump
     & docker @('exec', $cid, 'sh', '-c', $dumpPayload)
     if ($LASTEXITCODE -ne 0) { throw "mysqldump failed inside container" }
 
@@ -134,7 +171,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "docker cp of rewritten dump failed" }
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    $restorePayload = 'MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" exec mysql -u root {0} < /tmp/t13restore-{1}.sql' -f $restoreDb, $RunId
+    $restorePayload = 'MYSQL_PWD="${{MYSQL_ROOT_PASSWORD}}" exec mysql -u root {0} < /tmp/t13restore-{1}.sql' -f $restoreDb, $RunId
     & docker @('exec', $cid, 'sh', '-c', $restorePayload)
     if ($LASTEXITCODE -ne 0) { throw "restore into $restoreDb failed" }
     $sw.Stop()
@@ -194,14 +231,16 @@ try {
     }
     $results.dumpSha256              = $dumpHash
     $results.measuredRestoreSeconds  = [math]::Round($sw.Elapsed.TotalSeconds, 3)
-    # Operator-owned assumptions; intentionally blank placeholders.
-    $results.rpoAssumptionOperatorField = '<operator fills: acceptable data-loss window>'
-    $results.rtoAssumptionOperatorField = '<operator fills: acceptable recovery window>'
+    $results.rpoAssumptionOperatorField = $RpoAssumption
+    $results.rtoAssumptionOperatorField = $RtoAssumption
+    $results.rtoSeconds = $RtoSeconds
+    $results.restoreWithinRto = ($sw.Elapsed.TotalSeconds -le $RtoSeconds)
 
     if (-not $definitionsIdentical)                                { $results.overallPass = $false }
     if ($checksumDiffs.Count -gt 0)                               { $results.overallPass = $false }
     if ($bookingRows -ne $bookingRowsR -or $slotRows -ne $slotRowsR) { $results.overallPass = $false }
     if ($bookingAggSrc -ne $bookingAggR -or $slotAggSrc -ne $slotAggR) { $results.overallPass = $false }
+    if (-not $results.restoreWithinRto)                              { $results.overallPass = $false }
 }
 finally {
     # Remote temp cleanup only; NEVER touches source schema or volumes.
@@ -223,6 +262,8 @@ finally {
     }
 }
 
+$results.finishedAt = (Get-Date).ToString('o')
+$results.exitCode = $(if ($results.overallPass) { 0 } else { 2 })
 $outJson = ($results | ConvertTo-Json -Depth 6)
 # Defense-in-depth scrub before writing artifacts.
 $secretPool = @($env:T13_STUDENT_TOKEN) | Where-Object { $_ }

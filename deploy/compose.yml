@@ -1,6 +1,5 @@
-# T13 deploy slice 1 - local/container topology plan.
-# STATUS: statically authored only. compose config/build/up have NOT been run
-# and nothing here is validated yet (tasks 4.x remain unchecked).
+# T13 local/container topology. Runtime acceptance status and evidence are
+# tracked in deploy/evidence/verification-matrix.md; this file is not evidence.
 #
 # Contract summary:
 # - Only the edge service publishes a host port. Default binding is loopback
@@ -54,7 +53,7 @@ services:
     cpus: 1.0
 
   redis:
-    image: ${REDIS_IMAGE:-redis:7.2.5-alpine}
+    image: ${REDIS_IMAGE:-redis:7.4.9}
     <<: *restart_policy
     logging: *logging_bounds
     command: ["redis-server", "--appendonly", "yes"]
@@ -96,9 +95,12 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      # Enables the optional availability Cache Aside path (default false).
-      # Booking-lock Redis behavior remains separately fail-closed.
+      # Four independent T12 capability switches remain default-false except the
+      # local cache profile. Operators can enable them independently in .env.
+      BOOKING_OPERATION_LOG_ENABLED: ${BOOKING_OPERATION_LOG_ENABLED:-false}
       BOOKING_CACHE_ENABLED: ${BOOKING_CACHE_ENABLED:-true}
+      BOOKING_NOTIFICATIONS_ENABLED: ${BOOKING_NOTIFICATIONS_ENABLED:-false}
+      BOOKING_STATISTICS_ENABLED: ${BOOKING_STATISTICS_ENABLED:-false}
       SPRINGDOC_ENABLED: ${SPRINGDOC_ENABLED:-false}
     expose:
       - "8080"

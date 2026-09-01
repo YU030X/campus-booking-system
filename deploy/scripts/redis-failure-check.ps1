@@ -4,7 +4,8 @@
     T13 lane D: Redis-outage behavior proof - T07 booking lock MUST fail closed;
     T12 availability Cache Aside MUST fall back to MySQL.
 .DESCRIPTION
-    STATIC PLAN - never executed yet (tasks.md 5.4 stays unchecked until real run).
+    Reusable local outage lane; a run is evidence only when its recorded result
+    exits zero and Redis recovery succeeds.
 
     Contract under test (source of truth):
       * T07: booking POST must return HTTP 409 with envelope code 43000 and the
@@ -41,6 +42,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$startedAt = (Get-Date).ToString('o')
 
 # RunId feeds artifact paths and log lines: strictly bound.
 if ($RunId -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$') {
@@ -53,6 +55,10 @@ if (-not $ArtifactRoot) { $ArtifactRoot = (Resolve-Path (Join-Path $PSScriptRoot
 New-Item -ItemType Directory -Path $ArtifactRoot -Force | Out-Null
 $Artifacts = Join-Path $ArtifactRoot $RunId
 New-Item -ItemType Directory -Path $Artifacts -Force | Out-Null
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$gitHead = (& git -C $repoRoot rev-parse HEAD | Select-Object -First 1)
+$dockerClientVersion = (& docker version --format '{{.Client.Version}}' | Select-Object -First 1)
+$dockerServerVersion = (& docker version --format '{{.Server.Version}}' | Select-Object -First 1)
 
 # ---- Strict local-endpoint refusal --------------------------------------------
 $uri = [uri]$BaseUrl
@@ -112,14 +118,27 @@ $dateOnly = ($StartTime -split ' ')[0]
 # SYSTEM_BUSY constant mirrored from booking-api BookingMessages.java:5
 $sysBusyMessage = '当前预约请求较多，请稍后重试'
 
-$results = [ordered]@{ runId = $RunId; baseUrl = $BaseUrl; overallPass = $false }
+$results = [ordered]@{
+    runId = $RunId
+    startedAt = $startedAt
+    repositoryHead = $gitHead
+    workingDirectory = $repoRoot
+    powershellVersion = $PSVersionTable.PSVersion.ToString()
+    dockerClientVersion = $dockerClientVersion
+    dockerServerVersion = $dockerServerVersion
+    baseUrl = $BaseUrl
+    overallPass = $false
+}
 try {
     function Get-MutationSnapshot {
         param([string]$Label)
         $bookingTotal = (Invoke-AppMysqlExec -Query 'SELECT COUNT(*) FROM `booking`').Trim()
         $slotTotal    = (Invoke-AppMysqlExec -Query 'SELECT COUNT(*) FROM `booking_slot`').Trim()
-        $window       = (Invoke-AppMysqlExec -Query "SELECT COUNT(*) FROM `booking` WHERE resource_id=$ResourceId AND start_time >= '$dateOnly 00:00:00' AND end_time <= '$dateOnly 23:59:59'").Trim()
-        Write-Output "$Label snapshot: booking=$bookingTotal slot=$slotTotal window=$window"
+        # Do not use PowerShell backticks around booking in this interpolated
+        # string: `b is the backspace escape and would corrupt the SQL text.
+        $window       = (Invoke-AppMysqlExec -Query "SELECT COUNT(*) FROM booking WHERE resource_id=$ResourceId AND start_time >= '$dateOnly 00:00:00' AND end_time <= '$dateOnly 23:59:59'").Trim()
+        # Host-only diagnostic: do not contaminate the function's object output.
+        Write-Host "$Label snapshot: booking=$bookingTotal slot=$slotTotal window=$window"
         return [ordered]@{ booking = $bookingTotal; slot = $slotTotal; window = $window }
     }
 
@@ -228,6 +247,8 @@ catch {
     exit 1
 }
 
+$results.finishedAt = (Get-Date).ToString('o')
+$results.exitCode = $(if ($results.overallPass) { 0 } else { 2 })
 Set-Content -LiteralPath (Join-Path $Artifacts 'result.json') `
     -Value (Redact -Secrets @($studentToken) -Text ($results | ConvertTo-Json -Depth 6)) -Encoding utf8NoBOM
 

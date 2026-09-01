@@ -2,17 +2,18 @@
 
 Scope: T13 `deploy/**` files only. Static checks, local runner checks, backend/
 frontend acceptance, Compose config validation, API integration, StudentBrowser,
-and plans are recorded as they run; Docker runtime, recovery, load,
-ApprovalBrowser, and external gates retain explicit NOT RUN/BLOCKED states.
+image build/runtime, empty migration, backup/restore, and restart persistence
+are recorded from real runs. Load, ApprovalBrowser, and external gates retain
+explicit NOT RUN/BLOCKED states.
 
 ## Files
 
 | Path | Purpose | Status |
 |---|---|---|
-| `api/Dockerfile` | JDK17 multi-stage Maven build → non-root JRE runtime, jar-only copy, port 8080 | authored, unverified |
-| `web/Dockerfile` | pinned Node builder (`npm ci`, fail-closed on missing lock) + Vite dist served by pinned `nginx-unprivileged` (non-root, 8080) | authored, unverified |
-| `nginx/default.conf` | 8080 SPA fallback, `/api` → `http://api:8080` prefix-preserve proxy (controllers own `/api/v1/...` mappings), security headers, body limit/timeouts, upstream header hiding | authored, CSP not browser-validated |
-| `compose.yml` | edge/api/mysql8/redis topology, internal backend network, named volumes, healthchecks, restart/logging/mem/cpu bounds, `${VAR:?}` secret gating | authored; config gate tracked separately from daemon runtime |
+| `api/Dockerfile` | JDK17 multi-stage Maven build → non-root JRE runtime, jar-only copy, port 8080 | built from current checkout; runtime healthy |
+| `web/Dockerfile` | pinned Node builder (`npm ci`, fail-closed on missing lock) + Vite dist served by pinned `nginx-unprivileged` (non-root, 8080) | built from current checkout; runtime healthy |
+| `nginx/default.conf` | 8080 SPA fallback, `/api` → `http://api:8080` prefix-preserve proxy, headers, body limit/timeouts, upstream hiding | local HTTP scenarios verified; TLS remains external-gated |
+| `compose.yml` | edge/api/mysql8/redis topology, internal backend network, named volumes, healthchecks, restart/logging/mem/cpu bounds, `${VAR:?}` secret gating | config + four-service runtime verified |
 | `.env.example` | non-secret placeholders only; secrets generated locally into git-ignored `.env` | template |
 | `.gitignore` | keeps a local `deploy/.env` out of Git | active |
 
@@ -34,13 +35,13 @@ change remains Draft.
 Bases are pinned to fixed tags via `ARG` defaults overridable from `.env`
 (e.g. set `JRE_RUNTIME_IMAGE=eclipse-temurin@sha256:<digest>`). To update:
 
-1. Resolve the new immutable digest with your registry tooling (documented, not
-   automated here).
+1. Resolve the new immutable digest with registry tooling or locally cached
+   image metadata.
 2. Record old→new digest, reason, and date in the change's evidence index —
    never silently switch to a floating tag.
-3. Re-run local build/config gates before promoting.
-   ⚠ Open item: none of the default tag→digest pairs has been resolved yet
-   (tracked under task 4.1).
+3. Re-run local build/config gates before promoting. The 2026-09-01 local build
+   recorded every base RepoDigest and both application image IDs under
+   `deploy/artifacts/t13-image-build-20260901-current/`.
 
 ## package-lock fail-closed rule
 
@@ -76,10 +77,10 @@ docker compose --env-file .env down                    # volumes preserved
 
 | Path | Purpose | Status |
 |---|---|---|
-| `scripts/empty-migration-check.ps1` | V001–V005 on two throwaway MySQL8 containers; 12 tables/InnoDB/utf8mb4/seed-free + every DDL-declared index (unique+plain) exact-matched + SHA256 schema identity | authored, never run |
-| `scripts/backup-restore-check.ps1` | consistent mysqldump → isolated random restore DB → exact-12 + full normalized definition comparison, checksum/count/aggregate evidence, RPO/RTO fields | authored, never run |
-| `scripts/restart-persistence-check.ps1` | plan-only default (no secret needed); `-Execute` restarts/recreates with volumes preserved; requires all three containers healthy and proves persistence | authored, never run |
-| `scripts/redis-failure-check.ps1` | T07 fail-closed (409/43000/SYSTEM_BUSY, zero mutation) plus merged T12 availability MySQL fallback, latency, and Redis recovery | authored, runtime not run |
+| `scripts/empty-migration-check.ps1` | V001–V005 on two throwaway MySQL8 containers; 12 tables/InnoDB/utf8mb4/seed-free + all 34 DDL keys + SHA256 identity | PASS: `t13-empty-migration-20260901-final` |
+| `scripts/backup-restore-check.ps1` | consistent mysqldump → isolated random restore DB → exact-12 + definitions/checksums/aggregates + explicit RPO/RTO threshold | PASS: `t13-backup-restore-20260901-nonzero`; restore 2.131s ≤ RTO 14400s |
+| `scripts/restart-persistence-check.ps1` | volume-preserving restart; all cycled services healthy; schema/count identity | PASS: `t13-restart-persistence-20260901-audited` |
+| `scripts/redis-failure-check.ps1` | T07 fail-closed plus T12 availability MySQL fallback, zero mutation, latency, and Redis recovery | PASS: `t13-redis-outage-20260901-final` |
 | `runbooks/recovery.md` | lanes, rollback doctrine, RPO/RTO operator fields, stop conditions | planning doc |
 | `owner-change-requests.md` | resolved historical owner requests plus current external/digest/fixture/concurrency-history blockers | living doc |
 | `jmeter/booking-concurrency.jmx` | 5.6.3 plan; 100-thread same-slot group + distinct granularity group, property-gated, no assertions (offline classification) | authored, never run |
@@ -106,20 +107,21 @@ in `finally`. A script is accepted only when its own recorded run exits zero.
 
 ## Open items / honest gaps
 
-- T12 OCR-1/OCR-9 are resolved; a fresh T13 Compose outage run is still needed
-  for the deployment-specific Redis-failure lane.
-- Docker daemon is unavailable in the current environment, so image, migration,
-  health, restart, recovery, and Compose outage runtime evidence remains blocked.
-- JMeter 5.6.3 and the historical/fixture artifacts for all three rounds are absent;
-  ApprovalBrowser still lacks its deterministic owner-approved fixture/command.
-- Tag→digest resolution pending (above); digest-pinned promotion untested.
+- T12 OCR-1/OCR-9 are resolved; the deployment-specific live Redis outage lane
+  passes for both T07 fail-closed and T12 MySQL fallback behavior.
+- Docker/Compose four-service runtime is healthy and loopback-only. API/edge were
+  rebuilt from the current checkout using cached fixed bases; build metadata
+  records base RepoDigests and non-root application images. Earlier failed pull
+  attempts remain historical refresh failures, not current build failures.
+- Empty migration, backup/restore and restart persistence have audited local
+  evidence under `deploy/artifacts/`. JMeter 5.6.3 and historical/fixture
+  artifacts remain absent; ApprovalBrowser still lacks its owner contract.
 - API healthcheck inside its image container is TCP-connect liveness only
   (Temurin JRE ships no curl/wget); actuator HTTP `/actuator/health` probe
   parity still to be chosen/tested before relying on deep-health gating.
-- Datasource database + least-privilege account are created by the official
+- Datasource database + least-privilege account were exercised through the official
   MySQL image first-init via `MYSQL_DATABASE`/`MYSQL_USER`/`MYSQL_PASSWORD`
   service variables (same values the API consumes). This path is authored but
-  NOT yet exercised by a real `up`; first init is also the only time these are
-  applied, so changing them later requires a volume reset.
-- Nginx CSP header is conservative but not browser-tested; Element Plus runtime
-  behavior must be confirmed during headless E2E before any external claim.
+  MySQL first-init path; changing them later still requires a volume reset.
+- Local Nginx evidence covers SPA/deep route, API proxy, security headers,
+  3 MiB→413, and paused-upstream→504. TLS/certificate mounts remain external-gated.

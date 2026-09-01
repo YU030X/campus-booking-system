@@ -4,7 +4,8 @@
     T13 lane A: apply V001-V005 to two isolated, disposable MySQL 8 containers
     and prove identical, seed-free schema definitions.
 .DESCRIPTION
-    STATIC PLAN - never executed yet (tasks.md 5.1 stays unchecked until real run).
+    Reusable local verification lane; a run is evidence only when its recorded
+    result exits zero.
 
     Guarantees by design:
       * Two temporary containers with run-id-scoped names/volumes; NO published
@@ -39,6 +40,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$startedAt = (Get-Date).ToString('o')
 
 # RunId feeds container/volume names, artifact paths and SQL text: strictly bound.
 if ($RunId -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$') {
@@ -51,6 +53,7 @@ if (-not $ArtifactRoot) { $ArtifactRoot = (Resolve-Path (Join-Path $PSScriptRoot
 New-Item -ItemType Directory -Path $ArtifactRoot -Force | Out-Null
 $Artifacts = Join-Path $ArtifactRoot $RunId
 New-Item -ItemType Directory -Path $Artifacts -Force | Out-Null
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
 $ExpectedTables = @('user','resource_category','resource','resource_time_rule','resource_closure',
     'booking','booking_slot','approval_record','violation_record','blacklist',
@@ -89,13 +92,16 @@ function Invoke-Mysql {
 function Wait-MysqlReady {
     param([string]$Container, [int]$TimeoutSeconds)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $consecutiveSuccesses = 0
     while ((Get-Date) -lt $deadline) {
         try {
-            $null = Invoke-Mysql -Container $Container -Query 'SELECT 1'
-            return
+            $null = Invoke-Mysql -Container $Container -Query 'SELECT 1' 2>$null
+            $consecutiveSuccesses++
+            if ($consecutiveSuccesses -ge 3) { return }
         } catch {
-            Start-Sleep -Seconds 3
+            $consecutiveSuccesses = 0
         }
+        Start-Sleep -Seconds 3
     }
     throw "container ${Container}: readiness timeout after ${TimeoutSeconds}s"
 }
@@ -158,6 +164,19 @@ if ($ddlTables.Count -ne 12) {
 }
 Write-Output ("DDL declarations: {0} tables, {1} keys (PRIMARY+UNIQUE+plain KEY)" -f $ddlTables.Count, $ddlIndexes.Count)
 
+# Only after migration inputs pass local validation may Docker be inspected.
+# This lane is local-only and MUST NOT implicitly contact a registry.
+& docker image inspect $MySqlImage *> $null
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "BLOCKED: MySQL image '$MySqlImage' is not cached locally; implicit pull is forbidden"
+    exit 3
+}
+$imageId = (& docker image inspect $MySqlImage --format '{{.Id}}' | Select-Object -First 1)
+$repoDigests = @(& docker image inspect $MySqlImage --format '{{range .RepoDigests}}{{println .}}{{end}}') | Where-Object { $_ }
+$gitHead = (& git -C $repoRoot rev-parse HEAD | Select-Object -First 1)
+$dockerClientVersion = (& docker version --format '{{.Client.Version}}' | Select-Object -First 1)
+$dockerServerVersion = (& docker version --format '{{.Server.Version}}' | Select-Object -First 1)
+
 # ---- Throwaway credential lifecycle -------------------------------------------
 $rngBytes  = New-Object byte[] 24
 [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($rngBytes)
@@ -167,7 +186,21 @@ $savedHostPwd = if ($hadHostPwd) { $env:MYSQL_ROOT_PASSWORD } else { $null }
 
 $containers = @("t13-empty-a-$RunId", "t13-empty-b-$RunId")
 $volumes    = @("t13-empty-a-$RunId-data", "t13-empty-b-$RunId-data")
-$results = [ordered]@{ runId = $RunId; overallPass = $true; lanes = [ordered]@{} }
+$results = [ordered]@{
+    runId = $RunId
+    startedAt = $startedAt
+    repositoryHead = $gitHead
+    workingDirectory = $repoRoot
+    powershellVersion = $PSVersionTable.PSVersion.ToString()
+    dockerClientVersion = $dockerClientVersion
+    dockerServerVersion = $dockerServerVersion
+    mysqlImageRequested = $MySqlImage
+    mysqlImageId = $imageId
+    mysqlRepoDigests = @($repoDigests)
+    expectedDeclaredKeys = $ddlIndexes.Count
+    overallPass = $true
+    lanes = [ordered]@{}
+}
 
 try {
     for ($i = 0; $i -lt 2; $i++) {
@@ -178,7 +211,7 @@ try {
         $env:MYSQL_ROOT_PASSWORD = $generatedPassword
         try {
             Invoke-Docker -DockerArgs @('run', '-d', '--name', $name,
-                '--network', 'none',
+                '--network', 'none', '--pull', 'never',
                 '-e', 'MYSQL_ROOT_PASSWORD',
                 '--mount', $bindMount,
                 '-v', "${volume}:/var/lib/mysql",
@@ -198,11 +231,11 @@ try {
             $failures.Add("table set mismatch; got: $($tablesPresent -join ',')")
         }
         $engineRows = Invoke-Mysql -Container $name -Query "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA='booking_db' AND ENGINE<>'InnoDB'"
-        if (($engineRows -split "`n" | Where-Object { $_ }).Count -gt 0) {
+        if (@($engineRows -split "`n" | Where-Object { $_ }).Count -gt 0) {
             $failures.Add("non-InnoDB tables: $($engineRows.Trim())")
         }
         $charsetRows = Invoke-Mysql -Container $name -Query "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA='booking_db' AND TABLE_COLLATION NOT LIKE 'utf8mb4%'"
-        if (($charsetRows -split "`n" | Where-Object { $_ }).Count -gt 0) {
+        if (@($charsetRows -split "`n" | Where-Object { $_ }).Count -gt 0) {
             $failures.Add("non-utf8mb4 tables: $($charsetRows.Trim())")
         }
 
@@ -257,6 +290,8 @@ finally {
     }
 }
 
+$results.finishedAt = (Get-Date).ToString('o')
+$results.exitCode = $(if ($results.overallPass) { 0 } else { 2 })
 Set-Content -LiteralPath (Join-Path $Artifacts 'result.json') `
     -Value ($results | ConvertTo-Json -Depth 6) -Encoding utf8NoBOM
 if ($results.overallPass) {

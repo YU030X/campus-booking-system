@@ -1,6 +1,6 @@
 # T13 验证矩阵
 
-状态：**DRAFT / 部分实测**。T04-T12 已集成且主规格 strict validation 为 21/21；本地 backend、frontend、Compose config、API integration 和 StudentBrowser 已留下忽略的原始证据。Docker/JMeter/ApprovalBrowser/外部验收仍为 BLOCKED/NOT RUN。
+状态：**DRAFT / 部分实测**。T04-T12 已集成且主规格 strict validation 为 21/21；本地构建、四服务运行、backend/frontend、API integration、StudentBrowser、空库迁移、备份恢复和重启持久化均有忽略的原始证据。Redis outage、JMeter、ApprovalBrowser 和外部验收仍为 BLOCKED/NOT RUN。
 
 ## 证据规则
 
@@ -18,12 +18,12 @@
 | runner availability | `scripts/tests/t08/run.ps1 -Action Check` | Node、Chrome 可用 | `runner-check.txt` | 检查命令真实退出 0；未执行不宣称可用 | PASS：`CHECK_OK`，Chrome 152 |
 | backend verify | `deploy/verify/run.ps1 -Gate Backend` | JDK 17、隔离 MySQL/Redis 或测试所需服务 | `deploy/artifacts/verify-backend-t13-backend-pass/` | 真实退出 0，记录环境版本 | PASS：387/387，0 failure/error/skip |
 | frontend build | `deploy/verify/run.ps1 -Gate Frontend` | `package-lock.json`、Node 版本满足项目要求 | `deploy/artifacts/verify-frontend-t13-frontend-pass/` | clean install/build 真实退出 0；T13 不修改清单 | PASS：`npm ci` + build exit 0 |
-| compose topology | `deploy/verify/run.ps1 -Gate ComposeConfig` | 本地未跟踪 env 注入，只填运行时值 | `deploy/artifacts/verify-compose-config-local-compose-config/` | 仅 edge 发布端口；MySQL/Redis 无 host ports；private network、healthcheck、依赖顺序和 limits 存在 | PASS：config exit 0；daemon runtime 未覆盖 |
-| image/dependency scan | 选定仓库扫描器 + `docker image inspect` | 镜像已构建，tag→digest 已记录 | `image-scan.*` | 固定引用、无 secret、无高危未处置项 | 未执行 |
-| empty migration | `deploy/scripts/empty-migration-check.ps1` | Docker、MySQL 8 镜像、两个 disposable scope | `deploy/artifacts/<run-id>/` | 两个 fresh DB 均恰好 12 张 InnoDB/utf8mb4 表、零业务行、DDL indexes/PRIMARY 完整、schema hash 相同 | 未执行 |
-| backup/restore | `deploy/scripts/backup-restore-check.ps1` | 本地 compose MySQL 正常，已声明 RPO/RTO | `backup.sql`、`result.json`、definition/checksum files | source 不变；隔离 restore DB 12 表定义、代表性行数/聚合一致；RPO/RTO 有 operator 记录 | 未执行 |
-| restart persistence | `deploy/scripts/restart-persistence-check.ps1 -Execute` | stack healthy、已备份 | `pre-state.txt`、`post-state.txt`、config/log/result | API/MySQL/Redis 全部 healthy；数据/定义相同；未使用 `down`、`-v` 或删卷 | 未执行 |
-| Redis outage | `deploy/scripts/redis-failure-check.ps1` | 本地 token、fixture、T07 lock 已接线 | `t07-response.txt`、`result.json` | T07 409/43000/SYSTEM_BUSY、零 mutation、Redis 恢复；T12 当前 OCR-1 未解决，默认 BLOCKED_OWNER_WIRING | 未执行/受 owner 阻塞 |
+| compose topology/runtime | config + `docker compose up -d --no-build` | 本地未跟踪 env、缓存固定镜像 | `deploy/artifacts/t13-runtime-current-20260901/` | 仅 edge loopback 发布；DB/Redis private；四服务 healthy；SPA/API/limit/timeout 行为符合配置 | PASS：四服务 healthy；200/401/413/504 |
+| image build/digest | `docker compose ... build --pull=false api edge` + inspect | 固定基础镜像已缓存 | `deploy/artifacts/t13-image-build-20260901-current/` | 当前 checkout 构建成功；base RepoDigests 与非 root 用户记录；无 secret | PASS：API/edge built；四个 base RepoDigest 已记录 |
+| empty migration | `deploy/scripts/empty-migration-check.ps1` | Docker、MySQL 8 digest、两个 disposable scope | `deploy/artifacts/t13-empty-migration-20260901-final/` | 两个 fresh DB 均恰好 12 张 InnoDB/utf8mb4 表、零业务行、34 keys、schema hash 相同 | PASS：exit 0；完整运行元数据已记录 |
+| backup/restore | `deploy/scripts/backup-restore-check.ps1` | 本地 compose MySQL、显式 RPO/RTO | `deploy/artifacts/t13-backup-restore-20260901-nonzero/` | 隔离 restore DB 12 表定义/checksum/非空代表数据一致；restore≤RTO | PASS：booking 1→1，slots 2→2；2.131s ≤ 14400s；exit 0 |
+| restart persistence | `deploy/scripts/restart-persistence-check.ps1 -Execute` | stack healthy、已备份 | `deploy/artifacts/t13-restart-persistence-20260901-audited/` | API/MySQL/Redis healthy；数据/定义相同；未使用 `down`、`-v` 或删卷 | PASS：fingerprint identical；count diffs empty |
+| Redis outage | `deploy/scripts/redis-failure-check.ps1` | 生成 token、owner-scoped T08 fixture、T07/T12 wiring | `deploy/artifacts/t13-redis-outage-20260901-final/` | T07 409/43000/SYSTEM_BUSY、零 mutation；T12 MySQL fallback；Redis 恢复 | PASS：T07/T12 true；Redis recovered；exit 0 |
 | JMeter protected rounds | `deploy/jmeter/run.ps1` + `summarize.ps1` | valid seed、clean scope、JMeter 5.6.3、healthy Redis | XML JTL、metadata、report | protected same-slot 才能断言 1 success + 99 business conflict + 0 system/data/other errors；baseline/distinct 不套该断言 | 未执行/fixture 阻塞 |
 | API integration | `deploy/e2e/run.ps1 -Execute -Mode ApiIntegration` | 隔离 loopback MySQL/Redis、运行时凭据 | `deploy/artifacts/e2e-ApiIntegration-t13-api-integration-pass/` | 固定 37 类全部存在并执行；任何失败非零 | PASS：195/195，37 类，exit 0 |
 | StudentBrowser | `deploy/e2e/run.ps1 -Execute -Mode StudentBrowser` | fixture attestation、T08 runner availability | `deploy/artifacts/e2e-StudentBrowser-t13-student-browser-final/` | 只接受本次新 run；文本残留为零；PNG 人工复核完成后才可发布 | PASS：15/15；52/52 PNG 人工复核；redaction residual 0 |
@@ -34,8 +34,8 @@
 
 1. 已完成 `preconditions.md` 中 T04-T12 integration/spec-sync 证明。
 2. 已完成静态入口、runner availability、backend/frontend、Compose config、API integration 与 StudentBrowser。
-3. Docker daemon 可用后执行 image build、空库迁移和本地 health smoke。
-4. 在隔离数据范围内运行 backup/restore、restart persistence、Redis failure。
+3. 已从当前 checkout 构建并运行 API/edge，完成 health/HTTP smoke、空库迁移、backup/restore 和 restart persistence。
+4. Redis outage 已通过；保留失败重跑记录以说明两个 T13 harness 修复，不执行 `down -v`。
 5. 分别执行三轮 JMeter，并离线生成报告；再运行 StudentBrowser。ApprovalBrowser 只有 OCR-8 解决后才进入执行。
 6. 扫描所有 artifacts，人工复核截图，更新 evidence index；所有未运行或 blocked 门禁保持 Draft。
 7. 外部部署仅在获得明确授权后执行，并单独记录 rollback 与 monitoring 证据。
@@ -44,6 +44,6 @@
 
 - OCR-1 已由 owner 分支解决；OCR-5、OCR-6、OCR-7、OCR-8 仍阻塞 Demo/JMeter/ApprovalBrowser。
 - T13 integration/spec-sync 门禁已满足；change 仍因运行时与外部门禁保持 Draft。
-- 默认镜像 tag 尚未解析并记录 immutable digest。
-- JDK/Node/Chrome/MySQL/Redis 本地证据已采集；Docker daemon 不可用，JMeter 5.6.3 未安装。
+- 固定标签的远端刷新曾失败，但当前缓存镜像均有 RepoDigest，API/edge 已成功构建并运行；远端漏洞数据库扫描仍未执行。
+- Docker 四服务和 Redis outage 本地证据已采集；JMeter 5.6.3 未安装。
 - 不存在任何可发布的公共 URL、域名、TLS 证书或自动化云资源授权。
