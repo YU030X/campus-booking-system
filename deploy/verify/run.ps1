@@ -42,7 +42,7 @@ New-Item -ItemType Directory -Path $ArtifactRoot -Force | Out-Null
 $artifactDir = Join-Path $ArtifactRoot "verify-$Gate-$RunId"
 
 $gates = [ordered]@{
-    static = 'PowerShell parser, Node syntax, JMX XML, ownership/secret path review, git diff check'
+    static = 'PowerShell parser, Node syntax, JMX XML, JMeter/Demo/scan offline contracts, ownership/secret path review, git diff check'
     'compose-config' = 'docker compose --env-file deploy/.env -f deploy/compose.yml config'
     'tls-overlay-config' = 'deploy/scripts/tls-overlay-check.ps1 -Execute (compose config only; no TLS runtime)'
     backend = 'booking-api: mvn verify (JDK 17)'
@@ -107,12 +107,16 @@ if ($Mode -eq 'Check') {
     if ($LASTEXITCODE -ne 0) { [void]$failures.Add('Node redaction contract test') }
     $jmx = Join-Path $repoRoot 'deploy\jmeter\booking-concurrency.jmx'
     try { [xml](Get-Content -LiteralPath $jmx -Raw) | Out-Null } catch { [void]$failures.Add("JMX XML: $jmx") }
+    $contractRunId = 'static-' + $RunId.Substring(0, [Math]::Min($RunId.Length, 57))
     $jmeterContract = Join-Path $repoRoot 'deploy\jmeter\contract-tests.ps1'
-    & pwsh -NoProfile -File $jmeterContract -RunId "static-$RunId" *> $null
+    & pwsh -NoProfile -File $jmeterContract -RunId $contractRunId *> $null
     if ($LASTEXITCODE -ne 0) { [void]$failures.Add('JMeter offline contract tests') }
     $demoContract = Join-Path $repoRoot 'deploy\demo\contract-tests.ps1'
-    & pwsh -NoProfile -File $demoContract -RunId "static-$RunId" *> $null
+    & pwsh -NoProfile -File $demoContract -RunId $contractRunId *> $null
     if ($LASTEXITCODE -ne 0) { [void]$failures.Add('Demo offline contract tests') }
+    $scanContract = Join-Path $repoRoot 'deploy\scan\contract-tests.ps1'
+    & pwsh -NoProfile -File $scanContract -RunId $contractRunId *> $null
+    if ($LASTEXITCODE -ne 0) { [void]$failures.Add('Image scan evidence offline contract tests') }
     Push-Location $repoRoot
     try { git diff --check *> $null; if ($LASTEXITCODE -ne 0) { [void]$failures.Add('git diff --check') } } finally { Pop-Location }
     if ($failures.Count -gt 0) {
@@ -121,7 +125,7 @@ if ($Mode -eq 'Check') {
         Write-Warning "STATIC CHECK FAILED: $detail"
         exit 1
     }
-    Write-Result -ExitCode 0 -Status 'STATIC_ONLY_OK' -Detail 'Parser, Node, JMX XML, JMeter/Demo offline contracts, and git diff checks passed; runtime gates remain unexecuted.'
+    Write-Result -ExitCode 0 -Status 'STATIC_ONLY_OK' -Detail 'Parser, Node, JMX XML, JMeter/Demo/image-scan offline contracts, and git diff checks passed; runtime gates remain unexecuted.'
     Write-Output 'STATIC CHECK OK - this is not runtime evidence.'
     exit 0
 }

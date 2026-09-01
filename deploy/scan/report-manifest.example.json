@@ -1,0 +1,60 @@
+{
+  "$comment": "T13 image scan evidence manifest TEMPLATE. Copy beside local raw reports and replace every <...>. A local SBOM alone is not a CVE scan. Do not include credentials, registry tokens, or expanded secrets.",
+  "schemaVersion": 1,
+  "scanId": "<unique-run-id>",
+  "generatedAt": "<ISO-8601-scan-completion-time>",
+  "scanner": {
+    "name": "<trivy-or-grype>",
+    "version": "<scanner-version>",
+    "offline": true,
+    "databaseUpdatedAt": "<ISO-8601-advisory-db-time>",
+    "databaseMetadata": "<relative-db-metadata-file>",
+    "databaseChecksum": "sha256:<64-hex>",
+    "executionLog": "<relative-redacted-command-log>",
+    "executionLogSha256": "<64-hex>"
+  },
+  "targets": [
+    {
+      "name": "api",
+      "imageRef": "campus-booking/api:<tag>",
+      "imageId": "sha256:<64-hex>",
+      "imageDigest": "",
+      "reportFormat": "<trivy-json-or-grype-json>",
+      "rawReport": "<relative-api-report.json>",
+      "rawReportSha256": "<64-hex>",
+      "scanCompleted": true,
+      "scannerExitCode": 0,
+      "declaredCounts": {
+        "unknown": 0,
+        "negligible": 0,
+        "low": 0,
+        "medium": 0,
+        "high": 0,
+        "critical": 0
+      }
+    },
+    {
+      "name": "edge",
+      "imageRef": "campus-booking/edge:<tag>",
+      "imageId": "sha256:<64-hex>",
+      "imageDigest": "",
+      "reportFormat": "<trivy-json-or-grype-json>",
+      "rawReport": "<relative-edge-report.json>",
+      "rawReportSha256": "<64-hex>",
+      "scanCompleted": true,
+      "scannerExitCode": 0,
+      "declaredCounts": {
+        "unknown": 0,
+        "negligible": 0,
+        "low": 0,
+        "medium": 0,
+        "high": 0,
+        "critical": 0
+      }
+    }
+  ],
+  "decision": {
+    "status": "<PASS-FAIL-or-BLOCKED>",
+    "reason": "<operator-review-reason>"
+  }
+}

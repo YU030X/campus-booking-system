@@ -3,8 +3,9 @@
 Scope: T13 `deploy/**` files only. Static checks, local runner checks, backend/
 frontend acceptance, Compose config validation, API integration, StudentBrowser,
 image build/runtime, empty migration, backup/restore, and restart persistence
-are recorded from real runs. Load, ApprovalBrowser, and external gates retain
-explicit NOT RUN/BLOCKED states.
+are recorded from real runs. The image-scan validator has an offline synthetic
+contract only; no CVE scan was run. Load, ApprovalBrowser, Demo, vulnerability
+scan, and external gates retain explicit NOT RUN/BLOCKED states.
 
 ## Files
 
@@ -107,6 +108,10 @@ docker compose --env-file .env down                    # volumes preserved
 | `jmeter/summarize.ps1` | offline XML JTL classification (success/business_conflict/system_busy/server/connection/data_error/other) + strict protected 1/99/0 + slot-delta assertions; digest-only redacted reports | implementation contract-tested; no real JTL |
 | `jmeter/contract-tests.ps1` | parses JMX/template and exercises runner/report/privacy/fail-closed behavior with synthetic JTL only | PASS: 45 assertions; no JMeter/Docker/HTTP |
 | `jmeter/README.md` | flow, JTL privacy/redaction, comparability rules, blockers | planning doc |
+| `scan/run.ps1` | inert plan, read-only local scanner/database inventory, and hash/image/count/freshness validation for owner-produced offline Trivy/Grype JSON bundles | implementation contract-tested; no CVE scan |
+| `scan/contract-tests.ps1` | synthetic Trivy/Grype bundles exercising fail-closed evidence validation, including bounded execution-log credential screening; no scanner/Docker/registry/advisory/network access | PASS: 28 assertions |
+| `scan/report-manifest.example.json` | placeholder-only evidence manifest for exactly the API and edge images | template; validation intentionally blocks |
+| `scan/README.md` | local-only boundary, accepted evidence fields, and unavailable-scanner blocker | living runbook |
 | `e2e/profile.example.json` | isolated loopback E2E profile template; credential ENV NAMES only; public/prod denied | template; ignored runtime instance exercised |
 | `e2e/run.ps1` | Plan default; ApiIntegration (explicit class set, missing class blocks) / StudentBrowser (reuses T08 harness) / ApprovalBrowser (never passes; blocked without owner attestation) / All | API 195/195 + Student 15/15 executed |
 | `e2e/redact-artifacts.mjs` | offline artifact redactor; manifest path/rule/count only; residual-scan exit 2 | executed; residual 0 |
@@ -136,6 +141,11 @@ in `finally`. A script is accepted only when its own recorded run exits zero.
 - Empty migration, backup/restore and restart persistence have audited local
   evidence under `deploy/artifacts/`. JMeter 5.6.3 and historical/fixture
   artifacts remain absent; ApprovalBrowser still lacks its owner contract.
+- The scan validator's 28 synthetic assertions and the combined static gate
+  pass. Its read-only environment action returns `BLOCKED_NO_OFFLINE_SCANNER_DB`:
+  Docker Scout 1.20.4 is present without a verified offline advisory database,
+  and Trivy/Grype plus their databases are absent. SBOM inventories are not CVE
+  results, so task 7.4 remains unchecked.
 - API healthcheck inside its image container is TCP-connect liveness only
   (Temurin JRE ships no curl/wget); actuator HTTP `/actuator/health` probe
   parity still to be chosen/tested before relying on deep-health gating.
