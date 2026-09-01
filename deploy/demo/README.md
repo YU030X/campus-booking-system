@@ -11,9 +11,10 @@ pwsh deploy/demo/contract-tests.ps1
 ```
 
 The suite exercises only Plan and pre-I/O refusal paths, then statically checks
-the password/temporary-secret/teardown/evidence contracts. A PASS is not fixture
-attestation or Demo acceptance and does not complete tasks 6.1-6.4. The suite is
-also part of `deploy/verify/run.ps1 -Mode Check -Gate static`.
+the password/temporary-secret/journal/transactional-compensation/teardown/
+evidence contracts. The current suite passes 119 assertions. A PASS is not
+fixture attestation or Demo acceptance and does not complete tasks 6.1-6.4. The
+suite is also part of `deploy/verify/run.ps1 -Mode Check -Gate static`.
 
 ## What this is (and is not)
 
@@ -54,6 +55,15 @@ also part of `deploy/verify/run.ps1 -Mode Check -Gate static`.
   resource. A numeric but foreign/tampered map is refused with zero deletes.
 * Standalone Teardown requires an explicit fixture map via `-MapPath`; without
   it the mode is BLOCKED. The script never guesses the newest fixture scope.
+* Before the first mutation, Setup creates a non-secret
+  `partial-fixture-journal.json`; after each successful entity creation it records
+  the exact numeric id and deterministic owner tuple before the next setup phase.
+  If Setup then fails without a complete map, `finally` revalidates every recorded
+  tuple and rejects unjournaled notification/blacklist or resource-child rows.
+  Its authoritative recheck and children-first deletes run in one SERIALIZABLE
+  MySQL transaction with `FOR UPDATE` locks on parent rows and the complete
+  notification/blacklist/time-rule/closure ranges; any ownership/cleanup
+  mismatch selects `ROLLBACK`, never a half-committed compensation.
 
 ## Generated passwords
 
@@ -89,9 +99,13 @@ also part of `deploy/verify/run.ps1 -Mode Check -Gate static`.
   with scheduling enabled; if it does not fire within the wait window the run
   records `pending-owner-scan` and does NOT fabricate a violation.
 * Fixture attestation (OCR-5) is a template field only until an owner review.
-* If Setup fails after creating rows but before `fixture-map.json` is written,
-  the current `All`-mode finally block has no complete map and cannot safely
-  auto-compensate those partial rows. It performs no guessed delete and points
-  the operator at `recovery-scope.json`; owner review must resolve or explicitly
-  accept the remaining compensation design before attestation or a real Demo
-  run. The exact namespace preflight prevents silent reuse on retry.
+* If Setup fails after journaled rows exist but before `fixture-map.json`, the
+  current `All`/`Setup` finally path can transactionally compensate only those
+  recorded and revalidated tuples. This design has passed offline source
+  contracts, and a no-business-write MySQL 8.0.40 probe confirmed the conditional
+  COMMIT/ROLLBACK marker mechanism; no real compensation run exists.
+* A hard process interruption, API response loss, or journal write failure in the
+  gap after a mutation commits but before its tuple is persisted can still leave
+  an unjournaled row. `recovery-scope.json` and exact namespace preflight preserve
+  an honest manual recovery boundary; owner review must accept this residual gap
+  before attestation or a real Demo run.

@@ -70,6 +70,8 @@ function New-ValidProfile {
 function New-ValidMap {
     param([string]$MapRunId)
     $prefix = 't13demo_' + ($MapRunId -replace '-', '_')
+    $categoryName = "T13D-$MapRunId"
+    if ($categoryName.Length -gt 50) { $categoryName = $categoryName.Substring(0, 50) }
     return [ordered]@{
         runId = $MapRunId
         userPrefix = $prefix
@@ -82,7 +84,7 @@ function New-ValidMap {
         demoResourceId = '10'
         demoResourceName = "T13 DEMO $MapRunId approval room"
         demoCategoryId = '4'
-        demoCategoryName = "T13D-$MapRunId"
+        demoCategoryName = $categoryName
         pendingBookingId = '5'
         pastConfirmedBookingId = '6'
     }
@@ -118,6 +120,10 @@ try {
 
     $badRunId = Invoke-Runner @('-Mode', 'All', '-RunId', 'bad!run', '-ProfilePath', $profileTemplatePath, '-ArtifactRoot', $contractRoot)
     Assert-Contract ($badRunId.exitCode -eq 2 -and $badRunId.output -match 'REFUSED: RunId fails') 'invalid RunId must be refused'
+
+    $usernameOverflowRunId = 'a' * 36
+    $usernameOverflow = Invoke-Runner @('-Mode', 'All', '-RunId', $usernameOverflowRunId, '-ProfilePath', $profileTemplatePath, '-ArtifactRoot', $contractRoot)
+    Assert-Contract ($usernameOverflow.exitCode -eq 2 -and $usernameOverflow.output -match 'leaves no room for the demo username suffix') 'RunId that cannot fit deterministic usernames must be refused before setup'
 
     $missingProfile = Invoke-Runner @('-Mode', 'StudentFlow', '-Execute', '-RunId', 'ct-missing-profile', '-ProfilePath', (Join-Path $contractRoot 'absent.json'), '-ArtifactRoot', $contractRoot)
     Assert-Contract ($missingProfile.exitCode -eq 3 -and $missingProfile.output -match 'BLOCKED: demo profile not found') 'missing profile must block execution'
@@ -212,6 +218,32 @@ try {
     $recoveryBlock = $setup.Substring($recoveryStart, $recoveryScopeWriteIndex - $recoveryStart)
     Assert-Contract ($recoveryBlock -notmatch '(?i)\b(password|token|secret)\b') 'recovery scope must not contain credential fields'
 
+    $journalInitIndex = $setup.IndexOf('$script:recoveryJournal = [ordered]@{', [StringComparison]::Ordinal)
+    $journalFirstSaveIndex = $setup.IndexOf('Save-RecoveryJournal', $journalInitIndex, [StringComparison]::Ordinal)
+    Assert-Contract ($journalInitIndex -gt $recoveryScopeWriteIndex -and $journalFirstSaveIndex -gt $journalInitIndex -and $journalFirstSaveIndex -lt $firstApiWriteIndex) 'partial recovery journal must exist before the first mutation'
+    $journalInitBlock = $setup.Substring($journalInitIndex, $journalFirstSaveIndex - $journalInitIndex)
+    Assert-Contract ($journalInitBlock -notmatch '(?i)\b(password|token)\b') 'partial recovery journal must not contain credential fields'
+
+    $userJournalIndex = $setup.IndexOf('$script:recoveryJournal.users =', $firstApiWriteIndex, [StringComparison]::Ordinal)
+    $adminPromotionIndex = $setup.IndexOf('UPDATE ``user`` SET role=''ADMIN''', [StringComparison]::Ordinal)
+    Assert-Contract ($userJournalIndex -gt $firstApiWriteIndex -and $userJournalIndex -lt $adminPromotionIndex) 'each registered user must be journaled before the next setup phase'
+    $categoryApiIndex = $setup.IndexOf('Invoke-Api -Method Post -Url "$beUrl/api/v1/admin/categories"', [StringComparison]::Ordinal)
+    $categoryJournalIndex = $setup.IndexOf('$script:recoveryJournal.category =', $categoryApiIndex, [StringComparison]::Ordinal)
+    $resourceApiIndex = $setup.IndexOf('Invoke-Api -Method Post -Url "$beUrl/api/v1/admin/resources"', [StringComparison]::Ordinal)
+    Assert-Contract ($categoryJournalIndex -gt $categoryApiIndex -and $categoryJournalIndex -lt $resourceApiIndex) 'created category tuple must be journaled before resource creation'
+    $resourceJournalIndex = $setup.IndexOf('$script:recoveryJournal.resource =', $resourceApiIndex, [StringComparison]::Ordinal)
+    $timeRuleApiIndex = $setup.IndexOf('Invoke-Api -Method Put -Url "$beUrl/api/v1/admin/resources/$resId/time-rules"', [StringComparison]::Ordinal)
+    Assert-Contract ($resourceJournalIndex -gt $resourceApiIndex -and $resourceJournalIndex -lt $timeRuleApiIndex) 'created resource tuple must be journaled before time-rule creation'
+    $timeRuleJournalIndex = $setup.IndexOf('$script:recoveryJournal.timeRuleIds =', $timeRuleApiIndex, [StringComparison]::Ordinal)
+    $pendingApiIndex = $setup.IndexOf('Invoke-Api -Method Post -Url "$beUrl/api/v1/bookings"', [StringComparison]::Ordinal)
+    Assert-Contract ($timeRuleJournalIndex -gt $timeRuleApiIndex -and $timeRuleJournalIndex -lt $pendingApiIndex) 'created time-rule ids must be journaled before booking creation'
+    $pendingJournalIndex = $setup.IndexOf('$script:recoveryJournal.bookings =', $pendingApiIndex, [StringComparison]::Ordinal)
+    $pastInsertIndex = $setup.IndexOf('INSERT INTO ``booking``', $pendingJournalIndex, [StringComparison]::Ordinal)
+    Assert-Contract ($pendingJournalIndex -gt $pendingApiIndex -and $pendingJournalIndex -lt $pastInsertIndex) 'pending booking owner tuple must be journaled before past-booking creation'
+    $pastJournalIndex = $setup.IndexOf('$script:recoveryJournal.bookings =', $pendingJournalIndex + 1, [StringComparison]::Ordinal)
+    $firstPastSlotIndex = $setup.IndexOf('INSERT INTO ``booking_slot``', $pastInsertIndex, [StringComparison]::Ordinal)
+    Assert-Contract ($pastJournalIndex -gt $pastInsertIndex -and $pastJournalIndex -lt $firstPastSlotIndex) 'past booking owner tuple must be journaled before slot creation'
+
     $mapStart = $source.IndexOf('$map = [ordered]@{', [StringComparison]::Ordinal)
     $mapEnd = $source.IndexOf('Set-Content -LiteralPath $createdMapPath', $mapStart, [StringComparison]::Ordinal)
     Assert-Contract ($mapStart -ge 0 -and $mapEnd -gt $mapStart) 'fixture-map source block must be locatable'
@@ -252,13 +284,51 @@ try {
         $previousIndex = $currentIndex
     }
 
+    $partialStart = $source.IndexOf('function Invoke-DemoPartialRecovery', [StringComparison]::Ordinal)
+    $partialEnd = $source.IndexOf('function Invoke-DemoTeardown', $partialStart, [StringComparison]::Ordinal)
+    Assert-Contract ($partialStart -ge 0 -and $partialEnd -gt $partialStart) 'partial recovery source block must be locatable'
+    $partial = $source.Substring($partialStart, $partialEnd - $partialStart)
+    Assert-Contract ($partial -notmatch '(?im)Invoke-RootSql[^\r\n]*\bLIKE\b') 'partial recovery SQL must not use LIKE scopes'
+    Assert-Contract ($partial -notmatch '(?i)DROP\s+(DATABASE|TABLE)|docker\s+(?:compose\s+)?(?:down|volume)|\s-v\b') 'partial recovery must not drop schema or volumes'
+    $partialOwnershipIndex = $partial.IndexOf('Revalidate every recorded owner tuple before the first DELETE', [StringComparison]::Ordinal)
+    $partialFirstDeleteIndex = $partial.IndexOf('DELETE violation_record', [StringComparison]::Ordinal)
+    Assert-Contract ($partialOwnershipIndex -ge 0 -and $partialFirstDeleteIndex -gt $partialOwnershipIndex) 'partial recovery owner validation must precede the first delete'
+    foreach ($ownerGate in @('partial recovery user ownership mismatch', 'partial recovery category ownership mismatch', 'partial recovery resource ownership mismatch', 'partial recovery time-rule ownership mismatch', 'partial recovery booking ownership mismatch')) {
+        $ownerGateIndex = $partial.IndexOf($ownerGate, [StringComparison]::Ordinal)
+        Assert-Contract ($ownerGateIndex -ge 0 -and $ownerGateIndex -lt $partialFirstDeleteIndex) "partial recovery gate '$ownerGate' must precede the first delete"
+    }
+    Assert-Contract ($partial -match 'unjournaled notification/blacklist rows; zero deletes executed') 'partial recovery must refuse unjournaled user child rows'
+    Assert-Contract ($partial -notmatch 'DELETE FROM (?:notification|blacklist)') 'partial recovery must never delete unjournaled notification or blacklist rows'
+    Assert-Contract ($partial -match 'START TRANSACTION') 'partial recovery must execute its authoritative check/delete in one transaction'
+    Assert-Contract ($partial -match 'SET TRANSACTION ISOLATION LEVEL SERIALIZABLE') 'partial recovery must prevent phantoms while locking empty child ranges'
+    Assert-Contract ($partial -match 'FOR UPDATE') 'partial recovery must lock recorded parent/child rows before transactional revalidation'
+    Assert-Contract ($partial -match 'SELECT id FROM notification WHERE user_id IN \$userIn FOR UPDATE') 'partial recovery must lock the notification user-id range without deleting it'
+    Assert-Contract ($partial -match 'SELECT id FROM blacklist WHERE user_id IN \$userIn FOR UPDATE') 'partial recovery must lock the blacklist user-id range without deleting it'
+    Assert-Contract ($partial -match 'SELECT id FROM resource_time_rule WHERE resource_id=\$resourceId FOR UPDATE') 'partial recovery must lock the complete time-rule resource range'
+    Assert-Contract ($partial -match 'SELECT id FROM resource_closure WHERE resource_id=\$resourceId FOR UPDATE') 'partial recovery must lock the resource-closure range'
+    Assert-Contract ($partial -match '@ownership_ok') 'partial recovery deletes must be conditional on transactional ownership revalidation'
+    foreach ($cleanupTable in @('violation_record', 'approval_record', 'booking_slot', 'resource_time_rule', 'resource_closure')) {
+        Assert-Contract ($partial -match ("cleanupConditions\.Add\(.*SELECT COUNT\(\*\) FROM {0}" -f $cleanupTable)) "partial recovery transaction must include $cleanupTable in cleanup_ok"
+    }
+    Assert-Contract ($partial -match "'COMMIT', 'ROLLBACK'") 'partial recovery must roll back incomplete or mismatched cleanup'
+    Assert-Contract ($partial -match 'T13COMP:1:1') 'partial recovery must require the committed ownership/cleanup marker'
+    $partialDeleteOrder = @('DELETE violation_record', 'DELETE approval_record', 'DELETE booking_slot', 'DELETE FROM booking WHERE', 'DELETE FROM resource_time_rule', 'DELETE FROM resource WHERE', 'DELETE FROM resource_category', 'DELETE FROM ``user``')
+    $previousPartialIndex = -1
+    foreach ($needle in $partialDeleteOrder) {
+        $currentPartialIndex = $partial.IndexOf($needle, [StringComparison]::Ordinal)
+        Assert-Contract ($currentPartialIndex -gt $previousPartialIndex) "partial recovery must keep children-first order at '$needle'"
+        $previousPartialIndex = $currentPartialIndex
+    }
+    Assert-Contract ($partial -match 'PARTIAL_SETUP_COMPENSATED') 'successful partial recovery must persist a non-secret compensated status'
+
     # Evidence template stays entirely Draft/blocked and never self-promotes.
     $evidence = Get-Content -LiteralPath $evidenceTemplatePath -Raw
     Assert-Contract ($evidence -match 'Every row below is a NOT RUN / DRAFT placeholder') 'evidence template must declare Draft status globally'
     Assert-Contract ($evidence -match 'Approval browser flow.*BLOCKED \(OCR-8\)') 'approval browser row must remain OCR-8 blocked'
     Assert-Contract ($evidence -match 'REQUIRES MANUAL VISUAL PII REVIEW') 'screenshot evidence must require manual PII review'
     Assert-Contract ($evidence -notmatch '(?m)^\|[^\r\n]*\|\s*PASS\s*\|') 'no evidence row may be pre-marked PASS'
-    Assert-Contract ($source -match 'Setup may have failed before the complete fixture map; no automatic delete was attempted') 'All-mode finally must surface the pre-map recovery scope without guessing deletes'
+    Assert-Contract ($source -match 'finally: attempting compensation of journaled partial fixture rows') 'All/Setup finally must attempt exact journal-based partial recovery'
+    Assert-Contract ($source -match 'Setup failed before any recoverable owner tuple was journaled') 'finally must retain a no-delete recovery-scope fallback before any owner tuple exists'
 
     Write-Output "DEMO CONTRACT TESTS PASS - assertions=$assertions; no Docker, SQL, HTTP, E2E, or browser action was invoked."
     exit 0

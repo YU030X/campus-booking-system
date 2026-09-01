@@ -28,8 +28,9 @@
         PENDING booking via the student API; seeds a PAST CONFIRMED booking via
         direct SQL strictly labeled EPHEMERAL-SETUP-NOT-ACCEPTANCE-EVIDENCE so
         the OWNER no-show scan task can produce the violation/deduction itself
-        (wait window optional). Non-secret fixture-map.json records ids,
-        usernames, purpose strings, timestamps - never passwords.
+        (wait window optional). A non-secret incremental compensation journal
+        records each created id+owner tuple; fixture-map.json records the final
+        ids, usernames, purpose strings and timestamps - never passwords.
       * StudentFlow: generates a temporary e2e profile (fixtureAttested=true)
         and calls deploy/e2e/run.ps1 -Mode StudentBrowser. T08 registers its own
         browser users, so no fixture password is needed. ApprovalBrowser is
@@ -40,9 +41,10 @@
         leftovers, and never touches other rows, databases, or volumes.
         Missing fixture-map.json => BLOCKED.
       * All = Setup -> StudentFlow -> Teardown; any failure is non-zero and
-        finally still attempts Teardown (if a fixture map exists) and secret
-        deletion. Standalone StudentFlow needs no fixture password; standalone
-        Teardown requires an explicit fixture-map.json path.
+        finally still attempts full Teardown when a map exists, or transactionally
+        compensates only journaled/revalidated partial tuples. Standalone
+        StudentFlow needs no fixture password; standalone Teardown requires an
+        explicit fixture-map.json path.
     Exit codes: 0 pass | 1 environment/secret-cleanup | 2 refused | 3 blocked.
 #>
 [CmdletBinding()]
@@ -73,6 +75,13 @@ if (($userPrefix.Length + 7) -gt 50) {
 }
 $purposePrefix = "T13DEMO:$RunId`:"
 $resourceName = "T13 DEMO $RunId approval room"
+
+function Get-DemoCategoryName {
+    param([string]$CategoryRunId = $RunId)
+    $name = 'T13D-' + $CategoryRunId
+    if ($name.Length -gt 50) { return $name.Substring(0, 50) }
+    return $name
+}
 
 if (-not $ProfilePath)  { $ProfilePath  = (Join-Path $PSScriptRoot 'profile.example.json') }
 if (-not $ArtifactRoot) { $ArtifactRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\artifacts')).Path }
@@ -214,6 +223,7 @@ $secretFile = $null
 $secretCleanupFailed = $false
 $createdMapPath = (Join-Path $Artifacts 'fixture-map.json')
 $recoveryScopePath = (Join-Path $Artifacts 'recovery-scope.json')
+$recoveryJournalPath = (Join-Path $Artifacts 'partial-fixture-journal.json')
 $overall = 0
 
 function Save-SecretFile {
@@ -231,6 +241,13 @@ function Remove-SecretFileOrFail {
             Write-Warning ("FATAL: demo secret file could not be deleted: {0} - ROTATE the generated passwords." -f $script:secretFile)
         }
     }
+}
+
+function Save-RecoveryJournal {
+    if ($null -eq $script:recoveryJournal) { throw 'recovery journal state is unavailable' }
+    $temporaryPath = $recoveryJournalPath + '.tmp'
+    Set-Content -LiteralPath $temporaryPath -Value ($script:recoveryJournal | ConvertTo-Json -Depth 8) -Encoding utf8NoBOM
+    Move-Item -LiteralPath $temporaryPath -Destination $recoveryJournalPath -Force
 }
 
 function Invoke-DemoSetup {
@@ -251,8 +268,7 @@ function Invoke-DemoSetup {
     # names/purposes make the later owner-tuple teardown meaningful; a retry or a
     # foreign row in the same RunId scope must be recovered/reviewed, never
     # silently adopted as this run's fixture.
-    $categoryName = ('T13D-' + $RunId)
-    if ($categoryName.Length -gt 50) { $categoryName = $categoryName.Substring(0, 50) }
+    $categoryName = Get-DemoCategoryName
     $expectedUsernames = @('admin', 'student', 'intruder') | ForEach-Object { "${userPrefix}_$_" }
     $expectedUserIn = '(' + (@($expectedUsernames | ForEach-Object { "'$_'" }) -join ', ') + ')'
     $expectedPurposeIn = "('${purposePrefix}pending', '${purposePrefix}past-confirmed')"
@@ -289,8 +305,31 @@ function Invoke-DemoSetup {
     }
     Set-Content -LiteralPath $recoveryScopePath -Value ($recoveryScope | ConvertTo-Json -Depth 5) -Encoding utf8NoBOM
 
+    # Persist an incremental, non-secret compensation journal. Every recorded
+    # entity carries its exact id + deterministic owner tuple. If a later setup
+    # step fails in-process, finally may delete only these revalidated rows. The
+    # journal is not acceptance evidence and never contains passwords or tokens.
+    $script:recoveryJournal = [ordered]@{
+        schemaVersion = 1
+        runId = $RunId
+        fixtureOwner = $fixtureOwner
+        userPrefix = $userPrefix
+        purposePrefix = $purposePrefix
+        categoryName = $categoryName
+        resourceName = $resourceName
+        status = 'SETUP_IN_PROGRESS - NON-SECRET COMPENSATION JOURNAL'
+        users = @()
+        category = $null
+        resource = $null
+        timeRuleIds = @()
+        bookings = @()
+        updatedAt = (Get-Date).ToString('o')
+    }
+    Save-RecoveryJournal
+
     # 2) Register minimal users via the local API (no PII: optional fields null).
     $users = [ordered]@{}
+    $ids = [ordered]@{}
     foreach ($role in @('admin', 'student', 'intruder')) {
         $uname = ('{0}_{1}' -f $userPrefix, $role)
         if ($uname.Length -gt 50) { Write-Warning "REFUSED: derived username too long: $uname"; return 2 }
@@ -302,15 +341,14 @@ function Invoke-DemoSetup {
             return 1
         }
         $users[$role] = [ordered]@{ username = $uname; password = $pwd }
-    }
-
-    # ids via SQL (values validated numeric before reuse)
-    $ids = [ordered]@{}
-    foreach ($role in $users.Keys) {
-        $u = $users[$role].username
-        $id = Invoke-RootSql -File $composeFile -Query "SELECT id FROM ``user`` WHERE username='$u'"
+        $id = Invoke-RootSql -File $composeFile -Query "SELECT id FROM ``user`` WHERE username='$uname'"
         if ($id -notmatch '^\d+$') { throw "register did not persist $role user" }
         $ids[$role] = $id
+        $script:recoveryJournal.users = @($script:recoveryJournal.users) + @([ordered]@{
+            role = $role; id = $id; username = $uname
+        })
+        $script:recoveryJournal.updatedAt = (Get-Date).ToString('o')
+        Save-RecoveryJournal
     }
 
     # 3) Promote admin via container-side SQL.
@@ -338,6 +376,9 @@ function Invoke-DemoSetup {
     }
     $categoryId = [string]$cr.Data.id
     if ($categoryId -notmatch '^\d+$') { throw 'non-numeric category id returned' }
+    $script:recoveryJournal.category = [ordered]@{ id = $categoryId; name = $categoryName }
+    $script:recoveryJournal.updatedAt = (Get-Date).ToString('o')
+    Save-RecoveryJournal
 
     $resBody = @{
         categoryId = $categoryId; name = $resourceName; location = 'T13-DEMO'
@@ -353,6 +394,9 @@ function Invoke-DemoSetup {
     }
     $resId = [string]$rr.Data.id
     if ($resId -notmatch '^\d+$') { throw 'non-numeric resource id returned' }
+    $script:recoveryJournal.resource = [ordered]@{ id = $resId; name = $resourceName; categoryId = $categoryId }
+    $script:recoveryJournal.updatedAt = (Get-Date).ToString('o')
+    Save-RecoveryJournal
 
     # time rule for tomorrow 08:00-20:00 (owner-defined shape: dayOfWeek/startTime/endTime)
     $dow = ([int](Get-Date).Date.AddDays(1).DayOfWeek) % 7; if ($dow -eq 0) { $dow = 7 }
@@ -365,6 +409,10 @@ function Invoke-DemoSetup {
     }
     $ruleIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM resource_time_rule WHERE resource_id=$resId" |
         Where-Object { $_ -match '^\d+$' })
+    if ($ruleIds.Count -eq 0 -or @($ruleIds | Select-Object -Unique).Count -ne $ruleIds.Count) { throw 'time-rule ids are missing or duplicated' }
+    $script:recoveryJournal.timeRuleIds = $ruleIds
+    $script:recoveryJournal.updatedAt = (Get-Date).ToString('o')
+    Save-RecoveryJournal
 
     # 6) Deterministic PENDING booking via STUDENT API (tomorrow 10:00-11:00).
     $tomorrow = (Get-Date).Date.AddDays(1)
@@ -381,6 +429,12 @@ function Invoke-DemoSetup {
         return 1
     }
     $pendingBookingId = [string]$bk.Data.id
+    if ($pendingBookingId -notmatch '^\d+$') { throw 'non-numeric pending booking id returned' }
+    $script:recoveryJournal.bookings = @($script:recoveryJournal.bookings) + @([ordered]@{
+        id = $pendingBookingId; purpose = "${purposePrefix}pending"; userId = $ids['student']; resourceId = $resId
+    })
+    $script:recoveryJournal.updatedAt = (Get-Date).ToString('o')
+    Save-RecoveryJournal
 
     # 7) PAST CONFIRMED booking via direct SQL - EPHEMERAL-SETUP-NOT-ACCEPTANCE-
     #    EVIDENCE. Params are validated ids + known literals only. The OWNER
@@ -391,6 +445,11 @@ function Invoke-DemoSetup {
     $null = Invoke-RootSql -File $composeFile -Query ("INSERT INTO ``booking`` (booking_no, user_id, resource_id, start_time, end_time, purpose, status) SELECT CONCAT('T13DEMO', LPAD(id, 8, '0')), {0}, {1}, '{2}', '{3}', '{4}past-confirmed', 'CONFIRMED' FROM ``user`` WHERE id = {0}" -f $ids['student'], $resId, $pastStart, $pastEnd, $purposePrefix)
     $pastBookingId = (Invoke-RootSql -File $composeFile -Query "SELECT id FROM ``booking`` WHERE purpose='${purposePrefix}past-confirmed'").Trim()
     if ($pastBookingId -notmatch '^\d+$') { throw 'past CONFIRMED booking seed failed' }
+    $script:recoveryJournal.bookings = @($script:recoveryJournal.bookings) + @([ordered]@{
+        id = $pastBookingId; purpose = "${purposePrefix}past-confirmed"; userId = $ids['student']; resourceId = $resId
+    })
+    $script:recoveryJournal.updatedAt = (Get-Date).ToString('o')
+    Save-RecoveryJournal
     # Two 30-minute slots for the 60-minute window (matches owner splitter shape).
     $null = Invoke-RootSql -File $composeFile -Query "INSERT INTO ``booking_slot`` (resource_id, slot_time, booking_id) SELECT resource_id, start_time, id FROM ``booking`` WHERE id=$pastBookingId"
     $null = Invoke-RootSql -File $composeFile -Query "INSERT INTO ``booking_slot`` (resource_id, slot_time, booking_id) SELECT resource_id, DATE_ADD(start_time, INTERVAL 30 MINUTE), id FROM ``booking`` WHERE id=$pastBookingId"
@@ -434,6 +493,10 @@ function Invoke-DemoSetup {
     # Make the exact map available to the same process's StudentFlow/finally
     # teardown without relying on case-insensitive $MapPath/$mapPath aliases.
     $MapPath = $createdMapPath
+    $script:recoveryJournal.status = 'SETUP_COMPLETE - fixture-map.json is authoritative'
+    $script:recoveryJournal.updatedAt = (Get-Date).ToString('o')
+    Save-RecoveryJournal
+    Remove-Item -LiteralPath $recoveryJournalPath -Force
 
     # 9) secret temp JSON for the same run (passwords + tokens; NEVER artifact).
     $script:secret = [ordered]@{
@@ -516,6 +579,243 @@ function Invoke-DemoStudentFlow {
     return 0
 }
 
+function Invoke-DemoPartialRecovery {
+    if (-not (Test-Path -LiteralPath $recoveryJournalPath -PathType Leaf)) {
+        Write-Warning 'BLOCKED: partial recovery requires its exact recovery journal.'
+        return 3
+    }
+    try { $journal = Get-Content -LiteralPath $recoveryJournalPath -Raw | ConvertFrom-Json } catch {
+        Write-Warning 'REFUSED: partial recovery journal is not valid JSON.'
+        return 2
+    }
+    foreach ($required in @('schemaVersion', 'runId', 'userPrefix', 'purposePrefix', 'categoryName', 'resourceName', 'users', 'timeRuleIds', 'bookings')) {
+        if (-not $journal.PSObject.Properties[$required]) {
+            Write-Warning "REFUSED: partial recovery journal is missing $required."
+            return 2
+        }
+    }
+    $expectedCategoryName = Get-DemoCategoryName
+    if ([long]$journal.schemaVersion -ne 1 -or [string]$journal.runId -ne $RunId -or
+        [string]$journal.userPrefix -ne $userPrefix -or [string]$journal.purposePrefix -ne $purposePrefix -or
+        [string]$journal.categoryName -ne $expectedCategoryName -or [string]$journal.resourceName -ne $resourceName) {
+        Write-Warning 'REFUSED: partial recovery journal namespace does not match this exact run.'
+        return 2
+    }
+
+    $journalUsers = @($journal.users)
+    $allowedRoles = @('admin', 'student', 'intruder')
+    $userIds = @()
+    $userPredicates = @()
+    foreach ($user in $journalUsers) {
+        $role = [string]$user.role
+        $id = [string]$user.id
+        $username = [string]$user.username
+        if ($role -notin $allowedRoles -or $id -notmatch '^\d+$' -or $username -ne "${userPrefix}_$role") {
+            Write-Warning 'REFUSED: partial recovery user tuple is invalid.'
+            return 2
+        }
+        $userIds += $id
+        $userPredicates += "(id=$id AND username='$username')"
+    }
+    if (@($userIds | Select-Object -Unique).Count -ne $userIds.Count -or
+        @($journalUsers | ForEach-Object { [string]$_.role } | Select-Object -Unique).Count -ne $journalUsers.Count) {
+        Write-Warning 'REFUSED: partial recovery user tuples must be unique.'
+        return 2
+    }
+
+    $category = if ($journal.PSObject.Properties['category']) { $journal.category } else { $null }
+    $resource = if ($journal.PSObject.Properties['resource']) { $journal.resource } else { $null }
+    $categoryId = ''
+    $resourceId = ''
+    if ($null -ne $category) {
+        $categoryId = [string]$category.id
+        if ($categoryId -notmatch '^\d+$' -or [string]$category.name -ne $expectedCategoryName) {
+            Write-Warning 'REFUSED: partial recovery category tuple is invalid.'
+            return 2
+        }
+    }
+    if ($null -ne $resource) {
+        $resourceId = [string]$resource.id
+        if ($null -eq $category -or $resourceId -notmatch '^\d+$' -or [string]$resource.name -ne $resourceName -or
+            [string]$resource.categoryId -ne $categoryId) {
+            Write-Warning 'REFUSED: partial recovery resource tuple is invalid.'
+            return 2
+        }
+    }
+
+    $ruleIds = @($journal.timeRuleIds | ForEach-Object { [string]$_ })
+    if (($ruleIds.Count -gt 0 -and $null -eq $resource) -or
+        @($ruleIds | Where-Object { $_ -notmatch '^\d+$' }).Count -gt 0 -or
+        @($ruleIds | Select-Object -Unique).Count -ne $ruleIds.Count) {
+        Write-Warning 'REFUSED: partial recovery time-rule ids are invalid.'
+        return 2
+    }
+
+    $bookings = @($journal.bookings)
+    $bookingIds = @()
+    $bookingPredicates = @()
+    $studentTuple = @($journalUsers | Where-Object { [string]$_.role -eq 'student' })
+    foreach ($booking in $bookings) {
+        $id = [string]$booking.id
+        $purpose = [string]$booking.purpose
+        $userId = [string]$booking.userId
+        $bookingResourceId = [string]$booking.resourceId
+        if ($id -notmatch '^\d+$' -or $purpose -notin @("${purposePrefix}pending", "${purposePrefix}past-confirmed") -or
+            $studentTuple.Count -ne 1 -or $userId -ne [string]$studentTuple[0].id -or
+            $null -eq $resource -or $bookingResourceId -ne $resourceId) {
+            Write-Warning 'REFUSED: partial recovery booking tuple is invalid.'
+            return 2
+        }
+        $bookingIds += $id
+        $bookingPredicates += "(id=$id AND purpose='$purpose' AND user_id=$userId AND resource_id=$bookingResourceId)"
+    }
+    if (@($bookingIds | Select-Object -Unique).Count -ne $bookingIds.Count -or
+        @($bookings | ForEach-Object { [string]$_.purpose } | Select-Object -Unique).Count -ne $bookings.Count) {
+        Write-Warning 'REFUSED: partial recovery booking tuples must be unique.'
+        return 2
+    }
+
+    # Revalidate every recorded owner tuple before the first DELETE. Any missing,
+    # extra, or foreign row blocks compensation rather than widening its scope.
+    if ($userPredicates.Count -gt 0) {
+        $ownedUsers = (Invoke-RootSql -File $composeFile -Query ('SELECT COUNT(*) FROM ``user`` WHERE ' + ($userPredicates -join ' OR '))).Trim()
+        if ($ownedUsers -ne [string]$journalUsers.Count) { Write-Warning 'REFUSED: partial recovery user ownership mismatch; zero deletes executed.'; return 2 }
+        $userIn = '(' + ($userIds -join ', ') + ')'
+        $notificationCount = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM notification WHERE user_id IN $userIn").Trim()
+        $blacklistCount = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM blacklist WHERE user_id IN $userIn").Trim()
+        if ($notificationCount -ne '0' -or $blacklistCount -ne '0') {
+            Write-Warning 'REFUSED: partial recovery found unjournaled notification/blacklist rows; zero deletes executed.'
+            return 2
+        }
+    }
+    if ($null -ne $category) {
+        $ownedCategory = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_category WHERE id=$categoryId AND name='$expectedCategoryName'").Trim()
+        if ($ownedCategory -ne '1') { Write-Warning 'REFUSED: partial recovery category ownership mismatch; zero deletes executed.'; return 2 }
+    }
+    if ($null -ne $resource) {
+        $ownedResource = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource WHERE id=$resourceId AND name='$resourceName' AND category_id=$categoryId").Trim()
+        if ($ownedResource -ne '1') { Write-Warning 'REFUSED: partial recovery resource ownership mismatch; zero deletes executed.'; return 2 }
+        $actualRuleIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM resource_time_rule WHERE resource_id=$resourceId ORDER BY id" | Where-Object { $_ -match '^\d+$' })
+        if ((@($actualRuleIds | Sort-Object) -join ',') -ne (@($ruleIds | Sort-Object) -join ',')) {
+            Write-Warning 'REFUSED: partial recovery time-rule ownership mismatch; zero deletes executed.'
+            return 2
+        }
+        $closureCount = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_closure WHERE resource_id=$resourceId").Trim()
+        if ($closureCount -ne '0') { Write-Warning 'REFUSED: partial recovery found unrecorded resource closures; zero deletes executed.'; return 2 }
+    }
+    if ($bookingPredicates.Count -gt 0) {
+        $ownedBookings = (Invoke-RootSql -File $composeFile -Query ('SELECT COUNT(*) FROM booking WHERE ' + ($bookingPredicates -join ' OR '))).Trim()
+        if ($ownedBookings -ne [string]$bookings.Count) { Write-Warning 'REFUSED: partial recovery booking ownership mismatch; zero deletes executed.'; return 2 }
+    }
+
+    # The authoritative check+delete is a single MySQL transaction. Parent rows
+    # are locked first; ownership and absence of unjournaled user/resource child
+    # rows are recomputed inside the same connection. Deletes are conditional on
+    # @ownership_ok, and any incomplete cleanup selects ROLLBACK rather than
+    # committing a half-deleted fixture.
+    $transaction = [System.Collections.Generic.List[string]]::new()
+    [void]$transaction.Add('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
+    [void]$transaction.Add('START TRANSACTION')
+    $ownershipConditions = [System.Collections.Generic.List[string]]::new()
+    $cleanupConditions = [System.Collections.Generic.List[string]]::new()
+    if ($userPredicates.Count -gt 0) {
+        $userWhere = $userPredicates -join ' OR '
+        [void]$transaction.Add("SELECT id FROM ``user`` WHERE $userWhere FOR UPDATE")
+        [void]$transaction.Add("SELECT id FROM notification WHERE user_id IN $userIn FOR UPDATE")
+        [void]$transaction.Add("SELECT id FROM blacklist WHERE user_id IN $userIn FOR UPDATE")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM ``user`` WHERE $userWhere)=$($journalUsers.Count)")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM notification WHERE user_id IN $userIn)=0")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM blacklist WHERE user_id IN $userIn)=0")
+        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM ``user`` WHERE $userWhere)=0")
+    }
+    if ($null -ne $category) {
+        $categoryWhere = "id=$categoryId AND name='$expectedCategoryName'"
+        [void]$transaction.Add("SELECT id FROM resource_category WHERE $categoryWhere FOR UPDATE")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM resource_category WHERE $categoryWhere)=1")
+        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM resource_category WHERE $categoryWhere)=0")
+    }
+    if ($null -ne $resource) {
+        $resourceWhere = "id=$resourceId AND name='$resourceName' AND category_id=$categoryId"
+        [void]$transaction.Add("SELECT id FROM resource WHERE $resourceWhere FOR UPDATE")
+        [void]$transaction.Add("SELECT id FROM resource_time_rule WHERE resource_id=$resourceId FOR UPDATE")
+        [void]$transaction.Add("SELECT id FROM resource_closure WHERE resource_id=$resourceId FOR UPDATE")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM resource WHERE $resourceWhere)=1")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM resource_closure WHERE resource_id=$resourceId)=0")
+        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM resource WHERE $resourceWhere)=0")
+        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM resource_time_rule WHERE resource_id=$resourceId)=0")
+        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM resource_closure WHERE resource_id=$resourceId)=0")
+        if ($ruleIds.Count -gt 0) {
+            $ruleIn = '(' + ($ruleIds -join ', ') + ')'
+            [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM resource_time_rule WHERE resource_id=$resourceId)=$($ruleIds.Count)")
+            [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM resource_time_rule WHERE resource_id=$resourceId AND id IN $ruleIn)=$($ruleIds.Count)")
+        } else {
+            [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM resource_time_rule WHERE resource_id=$resourceId)=0")
+        }
+    }
+    if ($bookingIds.Count -gt 0) {
+        $bookingIn = '(' + ($bookingIds -join ', ') + ')'
+        $bookingWhere = $bookingPredicates -join ' OR '
+        [void]$transaction.Add("SELECT id FROM booking WHERE $bookingWhere FOR UPDATE")
+        [void]$transaction.Add("SELECT id FROM violation_record WHERE booking_id IN $bookingIn FOR UPDATE")
+        [void]$transaction.Add("SELECT id FROM approval_record WHERE booking_id IN $bookingIn FOR UPDATE")
+        [void]$transaction.Add("SELECT id FROM booking_slot WHERE booking_id IN $bookingIn FOR UPDATE")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM booking WHERE $bookingWhere)=$($bookings.Count)")
+        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM booking WHERE id IN $bookingIn)=0")
+        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM violation_record WHERE booking_id IN $bookingIn)=0")
+        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM approval_record WHERE booking_id IN $bookingIn)=0")
+        [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM booking_slot WHERE booking_id IN $bookingIn)=0")
+    }
+    if ($ownershipConditions.Count -eq 0) {
+        Write-Warning 'REFUSED: partial recovery journal contains no recorded entity to compensate.'
+        return 2
+    }
+    [void]$transaction.Add('SET @ownership_ok := IF((' + ($ownershipConditions -join ') AND (') + '), 1, 0)')
+    if ($bookingIds.Count -gt 0) {
+        [void]$transaction.Add("DELETE violation_record FROM violation_record JOIN booking ON violation_record.booking_id=booking.id WHERE booking.id IN $bookingIn AND @ownership_ok=1")
+        [void]$transaction.Add("DELETE approval_record FROM approval_record JOIN booking ON approval_record.booking_id=booking.id WHERE booking.id IN $bookingIn AND @ownership_ok=1")
+        [void]$transaction.Add("DELETE booking_slot FROM booking_slot JOIN booking ON booking_slot.booking_id=booking.id WHERE booking.id IN $bookingIn AND @ownership_ok=1")
+        [void]$transaction.Add("DELETE FROM booking WHERE id IN $bookingIn AND @ownership_ok=1")
+    }
+    if ($ruleIds.Count -gt 0) { [void]$transaction.Add("DELETE FROM resource_time_rule WHERE id IN $ruleIn AND resource_id=$resourceId AND @ownership_ok=1") }
+    if ($null -ne $resource) { [void]$transaction.Add("DELETE FROM resource WHERE $resourceWhere AND @ownership_ok=1") }
+    if ($null -ne $category) { [void]$transaction.Add("DELETE FROM resource_category WHERE $categoryWhere AND @ownership_ok=1") }
+    if ($userPredicates.Count -gt 0) { [void]$transaction.Add("DELETE FROM ``user`` WHERE ($userWhere) AND @ownership_ok=1") }
+    [void]$transaction.Add('SET @cleanup_ok := IF((' + ($cleanupConditions -join ') AND (') + '), 1, 0)')
+    [void]$transaction.Add("SET @finish_sql := IF(@ownership_ok=1 AND @cleanup_ok=1, 'COMMIT', 'ROLLBACK')")
+    [void]$transaction.Add('PREPARE t13_finish FROM @finish_sql')
+    [void]$transaction.Add('EXECUTE t13_finish')
+    [void]$transaction.Add('DEALLOCATE PREPARE t13_finish')
+    [void]$transaction.Add("SELECT CONCAT('T13COMP:', @ownership_ok, ':', @cleanup_ok)")
+    $transactionResult = Invoke-RootSql -File $composeFile -Query (($transaction -join ";`n") + ';')
+    if (@($transactionResult -split "`r?`n") -notcontains 'T13COMP:1:1') {
+        Write-Warning 'REFUSED: transactional partial recovery rolled back after an ownership or cleanup mismatch.'
+        return 2
+    }
+
+    $leftUsers = if ($userPredicates.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query ('SELECT COUNT(*) FROM ``user`` WHERE ' + ($userPredicates -join ' OR '))).Trim() } else { '0' }
+    $leftBookings = if ($bookingIds.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query ('SELECT COUNT(*) FROM booking WHERE id IN (' + ($bookingIds -join ', ') + ')')).Trim() } else { '0' }
+    $leftViolations = if ($bookingIds.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query ('SELECT COUNT(*) FROM violation_record WHERE booking_id IN (' + ($bookingIds -join ', ') + ')')).Trim() } else { '0' }
+    $leftApprovals = if ($bookingIds.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query ('SELECT COUNT(*) FROM approval_record WHERE booking_id IN (' + ($bookingIds -join ', ') + ')')).Trim() } else { '0' }
+    $leftSlots = if ($bookingIds.Count -gt 0) { (Invoke-RootSql -File $composeFile -Query ('SELECT COUNT(*) FROM booking_slot WHERE booking_id IN (' + ($bookingIds -join ', ') + ')')).Trim() } else { '0' }
+    $leftResource = if ($null -ne $resource) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource WHERE id=$resourceId AND name='$resourceName'").Trim() } else { '0' }
+    $leftRules = if ($null -ne $resource) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_time_rule WHERE resource_id=$resourceId").Trim() } else { '0' }
+    $leftClosures = if ($null -ne $resource) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_closure WHERE resource_id=$resourceId").Trim() } else { '0' }
+    $leftCategory = if ($null -ne $category) { (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_category WHERE id=$categoryId AND name='$expectedCategoryName'").Trim() } else { '0' }
+    if ($leftUsers -ne '0' -or $leftBookings -ne '0' -or $leftViolations -ne '0' -or $leftApprovals -ne '0' -or
+        $leftSlots -ne '0' -or $leftResource -ne '0' -or $leftRules -ne '0' -or $leftClosures -ne '0' -or $leftCategory -ne '0') {
+        Write-Warning 'PARTIAL RECOVERY FAILED: recorded fixture rows remain.'
+        return 1
+    }
+    $script:recoveryJournal = [ordered]@{
+        schemaVersion = 1; runId = $RunId; status = 'PARTIAL_SETUP_COMPENSATED'
+        compensatedAt = (Get-Date).ToString('o')
+        removed = [ordered]@{ users = $journalUsers.Count; bookings = $bookings.Count; resource = [int]($null -ne $resource); category = [int]($null -ne $category) }
+    }
+    Save-RecoveryJournal
+    Write-Warning 'PARTIAL SETUP COMPENSATED: only journaled and revalidated owner tuples were removed.'
+    return 0
+}
+
 function Invoke-DemoTeardown {
     if (-not $MapPath -or -not (Test-Path -LiteralPath $MapPath)) {
         Write-Warning 'BLOCKED: Teardown requires -MapPath to an existing fixture-map.json (never guess scope).'
@@ -533,7 +833,7 @@ function Invoke-DemoTeardown {
     $resourceNameFromMap = [string]$map.demoResourceName
     $categoryNameFromMap = [string]$map.demoCategoryName
     if (-not $resourceNameFromMap -or $resourceNameFromMap -ne ("T13 DEMO $($map.runId) approval room") -or
-        -not $categoryNameFromMap -or $categoryNameFromMap -ne ("T13D-$($map.runId)")) {
+        -not $categoryNameFromMap -or $categoryNameFromMap -ne (Get-DemoCategoryName -CategoryRunId ([string]$map.runId))) {
         Write-Warning 'REFUSED: fixture map resource name does not match its run namespace.'
         return 2
     }
@@ -638,6 +938,7 @@ function Invoke-DemoTeardown {
 
 # ---- Orchestration --------------------------------------------------------------
 $script:secret = $null
+$script:recoveryJournal = $null
 $modeResults = [ordered]@{}
 $modesToRun = @()
 switch ($Mode) {
@@ -686,8 +987,20 @@ finally {
             Write-Warning ("finally teardown raised: {0}" -f $_.Exception.Message)
             if ($overall -eq 0) { $overall = 1 }
         }
-    } elseif ($Mode -eq 'All' -and (Test-Path -LiteralPath $recoveryScopePath)) {
-        Write-Warning ("finally: Setup may have failed before the complete fixture map; no automatic delete was attempted. Review exact non-secret recovery scope: {0}" -f $recoveryScopePath)
+    } elseif ($Mode -in @('All', 'Setup') -and (Test-Path -LiteralPath $recoveryJournalPath)) {
+        try {
+            Write-Output 'finally: attempting compensation of journaled partial fixture rows...'
+            $rcP = Invoke-DemoPartialRecovery
+            if ($rcP -ne 0) {
+                Write-Warning 'finally partial recovery reported a problem; review the journal and recovery scope.'
+                if ($overall -eq 0) { $overall = $rcP }
+            }
+        } catch {
+            Write-Warning ("finally partial recovery raised: {0}" -f $_.Exception.Message)
+            if ($overall -eq 0) { $overall = 1 }
+        }
+    } elseif ($Mode -in @('All', 'Setup') -and (Test-Path -LiteralPath $recoveryScopePath)) {
+        Write-Warning ("finally: Setup failed before any recoverable owner tuple was journaled. Review exact non-secret recovery scope: {0}" -f $recoveryScopePath)
         if ($overall -eq 0) { $overall = 1 }
     }
 }

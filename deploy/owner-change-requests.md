@@ -68,13 +68,15 @@ users, T13-owned approval resource, deterministic PENDING booking, past
 CONFIRMED seed left to the OWNER no-show scan). They remain UNEXECUTED and
 UNATTESTED: `fixtureAttested` stays false until an owner review of the demo
 lifecycle; until then StudentBrowser/E2E consume the fixture only in blocked
-or planning form. The offline contract suite covers only pre-I/O refusal,
-secret-lifecycle and exact-scope teardown structure. Owner review must also
-resolve or accept the recovery design for a Setup failure that occurs after
-some rows are created but before the complete `fixture-map.json` is written;
-the runner now preserves an exact non-secret pre-mutation `recovery-scope.json`
-and intentionally performs no guessed delete, but automatic compensation still
-requires owner review before attestation.
+or planning form. The 119-assertion offline suite covers pre-I/O refusal,
+secret lifecycle, incremental non-secret owner-tuple journaling, transactional
+partial compensation and exact-scope teardown structure. Journaled tuples are
+revalidated and range-locked in one SERIALIZABLE MySQL transaction;
+unjournaled child rows or any cleanup mismatch cause rollback. A hard
+interruption/API-response/journal-write
+gap after mutation commit can still leave an unjournaled row, and no real
+compensation run exists. Owner review must explicitly accept that residual
+manual-recovery boundary before attestation.
 
 ## OCR-8 (approval owners): deterministic approval-browser fixture + approved command missing
 
