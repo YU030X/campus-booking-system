@@ -2,7 +2,7 @@
 
 Date: 2026-09-01
 Branch: `codex/verify-and-deploy-system`  
-Implementation baseline: `7b336f4 test: validate offline image scan evidence`
+Implementation baseline: `924da16 fix: compensate partial Demo setup safely`
 Worktree: `D:\Projects\project1_campus\target\worktrees\verify-and-deploy-system`  
 Status: **DRAFT / partially accepted; do not archive**
 OpenSpec apply progress: **24/34 tasks complete**
@@ -42,12 +42,15 @@ OpenSpec apply progress: **24/34 tasks complete**
   invoked no JMeter, Docker or HTTP request and is not a real three-round
   performance result.
 - Demo tasks 6.1-6.4 remain unchecked, but the authored harness now has a
-  74-assertion offline contract suite covering profile ownership/namespace/wait
+  119-assertion offline contract suite covering profile ownership/namespace/wait
   gates, loopback and attestation refusal, missing/invalid teardown maps,
   32-byte RNG and temp-secret finally behavior, exact children-first teardown,
   zero-collision preflight, pre-mutation recovery scope, tamper-resistant
-  owner-tuple teardown, and all-Draft evidence. It invoked no Docker, SQL, HTTP,
-  E2E or browser action.
+  owner-tuple teardown, incremental non-secret recovery journaling,
+  SERIALIZABLE parent/range locks, complete child+parent cleanup conditions,
+  conditional rollback, and all-Draft evidence. It invoked no Docker, SQL, HTTP,
+  E2E or browser action. A separate no-business-write MySQL 8.0.40 probe returned
+  `T13COMP:1:1`, proving the conditional transaction-control syntax only.
 - Demo hardening is committed through `86de80c`: Setup performs an exact
   zero-collision preflight before mutation, writes a non-secret recovery scope
   before mutation, and Teardown validates unique numeric IDs plus exact
@@ -112,16 +115,21 @@ OpenSpec apply progress: **24/34 tasks complete**
   synthetic contract suite, read-only local environment blocker, static-gate
   integration, and truthful task/matrix documentation. It does not complete the
   real scan portion of task 7.4.
+- T13 commit `924da16`: journals each created Demo owner tuple, transactionally
+  revalidates and locks journaled parent/child ranges, refuses unjournaled child
+  rows, and rolls back any incomplete partial compensation. This is implementation
+  hardening only; no real Setup/compensation/Demo was run.
 
 ## Remaining blockers — keep tasks unchecked
 
-1. JMeter 5.6.3 is absent. Although the authored harness now passes its offline
-   contract suite, the vulnerable-baseline, unique-index-only, valid seed, and
-   100-row distinct fixture/history artifacts are absent (OCR-5/6/7). No real
-   three-round performance claim exists.
+1. JMeter 5.6.3 is absent. A current audit of PATH/common caches, Docker images,
+   every Git ref/object and stash metadata found no runnable JMeter, vulnerable
+   baseline, unique-index-only history, approved valid seed, runtime 100-row CSV,
+   JTL or real report (OCR-5/6/7). No three-round performance claim exists.
 2. ApprovalBrowser lacks an owner-attested deterministic fixture and approved
-   executable (OCR-8). Direct StudentBrowser evidence does not satisfy the
-   approval-path half of task 2.4.
+   executable (OCR-8). `scripts/tests/t11/run.ps1` is a real local candidate with
+   approve/reject evidence, but it is unattested and lacks the required per-state
+   refresh matrix; it was not executed or silently adopted by T13.
 3. Vulnerability/dependency scanning is not run. A local audit found Docker
    Scout v1.20.4 and its cached SBOM, but no local advisory/CVE database and no
    documented offline-CVE mode. Trivy, Grype, Syft CLI and OSV-Scanner are not
@@ -132,10 +140,11 @@ OpenSpec apply progress: **24/34 tasks complete**
    deployment authorization exists (OCR-2). Tasks 8.1-8.3 remain blocked and no
    public URL/TLS claim is allowed.
 5. Demo fixture owner attestation and execution remain absent; tasks 6.1-6.4
-   stay Draft. Additionally, Setup can create partial rows before the complete
-   fixture map exists; its current finally block cannot safely auto-compensate
-   that pre-map failure without a reviewed compensation design. The runner now
-   preserves a non-secret exact recovery scope and never guesses a delete.
+   stay Draft. Journaled partial tuples can now be revalidated and compensated in
+   one SERIALIZABLE transaction, but no runtime recovery evidence exists. A hard
+   interruption, API response loss, or journal-write failure after mutation commit
+   can still leave an unjournaled row; exact recovery scope/manual review remains
+   the honest boundary until the owner accepts it.
 
 ## 2026-09-01 system integrity audit
 
@@ -173,7 +182,7 @@ OpenSpec apply progress: **24/34 tasks complete**
 - The T12 change still has one governance confirmation open: task 0.1 names the
   unreachable base `0e53b7e`, while the verified shared base is `2ffae9d`.
   Do not rewrite or check that task without explicit user confirmation.
-- The implementation baseline is `7b336f4`; the only follow-up change is this
+- The implementation baseline is `924da16`; the only follow-up change is this
   handoff refresh. No push has been performed.
 - The scan batch contains `run.ps1`, `contract-tests.ps1`, README guidance and an
   example manifest intended to validate owner-supplied offline Trivy/Grype JSON
@@ -184,7 +193,8 @@ OpenSpec apply progress: **24/34 tasks complete**
   screening were fixed. It is committed but must not be cited as real scan
   evidence.
 - The JMeter report-schema/synthetic contract-test, optional TLS-overlay, and
-  Demo offline contract batches are committed. JMeter/Trivy/Grype/OSV-Scanner
+  119-assertion Demo compensation/teardown contract batches are committed.
+  JMeter/Trivy/Grype/OSV-Scanner
   CLIs remain absent; Docker's local SBOM command was available and produced the
   inventories listed above, while Docker Scout lacks a locally verified advisory
   database.
