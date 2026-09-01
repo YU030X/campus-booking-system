@@ -5,7 +5,7 @@ Branch: `codex/verify-and-deploy-system`
 Implementation baseline: `a31ac1e fix: close Docker recovery gates`
 Worktree: `D:\Projects\project1_campus\target\worktrees\verify-and-deploy-system`  
 Status: **DRAFT / partially accepted; do not archive**
-OpenSpec apply progress: **20/34 tasks complete**
+OpenSpec apply progress: **23/34 tasks complete**
 
 ## Completed and verified
 
@@ -27,6 +27,13 @@ OpenSpec apply progress: **20/34 tasks complete**
   `deploy/artifacts/t13-local-sbom-20260901/api.syft.json` and
   `deploy/artifacts/t13-local-sbom-20260901/edge.syft.json`. These are ignored
   package inventories only; they are not vulnerability/CVE scan results.
+- JMeter tasks 3.1-3.3 are implementation-complete and offline contract-tested.
+  `deploy/jmeter/contract-tests.ps1` passed 45 assertions covering the three
+  round template, 100/1/1 groups, loopback/baseline/CSV gates, strict response
+  classification, report metadata/evidence links, protected 1/99 rules,
+  row-delta checks, non-zero JMeter exits, privacy and fail-closed inputs. It
+  invoked no JMeter, Docker or HTTP request and is not a real three-round
+  performance result.
 - Empty-database migration passes in
   `deploy/artifacts/t13-empty-migration-20260901-final/`: exact MySQL digest,
   two fresh databases, 12 tables, 34 keys, zero rows, identical fingerprints,
@@ -73,9 +80,10 @@ OpenSpec apply progress: **20/34 tasks complete**
 
 ## Remaining blockers — keep tasks unchecked
 
-1. JMeter 5.6.3 is absent. The vulnerable-baseline, unique-index-only, valid
-   seed, and 100-row distinct fixture/history artifacts are also absent
-   (OCR-5/6/7). No three-round performance claim exists.
+1. JMeter 5.6.3 is absent. Although the authored harness now passes its offline
+   contract suite, the vulnerable-baseline, unique-index-only, valid seed, and
+   100-row distinct fixture/history artifacts are absent (OCR-5/6/7). No real
+   three-round performance claim exists.
 2. ApprovalBrowser lacks an owner-attested deterministic fixture and approved
    executable (OCR-8). Direct StudentBrowser evidence does not satisfy the
    approval-path half of task 2.4.
@@ -125,16 +133,14 @@ OpenSpec apply progress: **20/34 tasks complete**
   unreachable base `0e53b7e`, while the verified shared base is `2ffae9d`.
   Do not rewrite or check that task without explicit user confirmation.
 - No push has been performed.
-- The tracked worktree was clean at `a31ac1e` before this handoff-only edit.
-- Work paused before any planned JMeter report-schema or synthetic contract-test
-  edits. JMeter/Syft/Trivy/Grype CLIs remain absent; Docker's local SBOM command
-  was available and produced the inventories listed above.
+- The tracked worktree was clean at `0f69b1c` before the JMeter contract batch.
+- The JMeter report-schema and synthetic contract-test batch is complete.
+  JMeter/Syft/Trivy/Grype CLIs remain absent; Docker's local SBOM command was
+  available and produced the inventories listed above.
 
 ## Safe continuation order
 
-1. Contract-test the existing JMeter plan/runner/summarizer using synthetic JTL
-   only if continuing local harness work; do not claim a real performance pass.
-   Obtain JMeter plus owner-provided historical/fixture artifacts before any
+1. Obtain JMeter plus owner-provided historical/fixture artifacts before any
    concurrency execution. Never fabricate weakened migrations or mock results.
 2. Obtain the ApprovalBrowser owner contract before executing that lane.
 3. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real

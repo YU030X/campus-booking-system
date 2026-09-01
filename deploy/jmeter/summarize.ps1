@@ -58,8 +58,10 @@ if (-not (Test-Path -LiteralPath $RunDir)) { Write-Warning "BLOCKED: RunDir not 
 
 $jtlPath = Join-Path $RunDir 'results.xml'
 $metaPath = Join-Path $RunDir 'run-metadata.json'
+$jmeterLogPath = Join-Path $RunDir 'jmeter.log'
 if (-not (Test-Path -LiteralPath $jtlPath))  { Write-Warning "BLOCKED: results.xml missing (plan artifacts only?)"; exit 3 }
 if (-not (Test-Path -LiteralPath $metaPath)) { Write-Warning "BLOCKED: run-metadata.json missing"; exit 3 }
+if (-not (Test-Path -LiteralPath $jmeterLogPath)) { Write-Warning "BLOCKED: jmeter.log missing"; exit 3 }
 
 if (-not $ReportDir) { $ReportDir = $RunDir }
 if (-not (Test-Path -LiteralPath $ReportDir)) {
@@ -68,6 +70,90 @@ if (-not (Test-Path -LiteralPath $ReportDir)) {
 
 $metadata = Get-Content -LiteralPath $metaPath -Raw | ConvertFrom-Json
 $token = $env:T13_STUDENT_TOKEN
+
+function Stop-Blocked {
+    param([string]$Message)
+    Write-Warning "BLOCKED: $Message"
+    exit 3
+}
+
+function Get-RequiredProperty {
+    param($Object, [string]$Name)
+    $property = if ($Object) { $Object.PSObject.Properties[$Name] } else { $null }
+    if (-not $property -or $null -eq $property.Value) {
+        Stop-Blocked "run metadata is missing '$Name'"
+    }
+    return $property.Value
+}
+
+function Get-RequiredText {
+    param($Object, [string]$Name)
+    $value = [string](Get-RequiredProperty -Object $Object -Name $Name)
+    if ([string]::IsNullOrWhiteSpace($value) -or $value -match '^<.*>$') {
+        Stop-Blocked "run metadata '$Name' is empty or still a placeholder"
+    }
+    return $value
+}
+
+function Get-RequiredLong {
+    param($Object, [string]$Name, [long]$Minimum = 0)
+    $raw = Get-RequiredProperty -Object $Object -Name $Name
+    [long]$value = 0
+    if (-not [long]::TryParse([string]$raw, [ref]$value) -or $value -lt $Minimum) {
+        Stop-Blocked "run metadata '$Name' must be an integer >= $Minimum"
+    }
+    return $value
+}
+
+function Get-RequiredBoolean {
+    param($Object, [string]$Name)
+    $value = Get-RequiredProperty -Object $Object -Name $Name
+    if ($value -isnot [bool]) { Stop-Blocked "run metadata '$Name' must be a JSON boolean" }
+    return [bool]$value
+}
+
+function Get-RequiredCounts {
+    param($Object, [string]$Name)
+    $counts = Get-RequiredProperty -Object $Object -Name $Name
+    return [ordered]@{
+        bookingTotal = Get-RequiredLong -Object $counts -Name 'bookingTotal' -Minimum 0
+        slotTotal = Get-RequiredLong -Object $counts -Name 'slotTotal' -Minimum 0
+        scopeWindow = Get-RequiredLong -Object $counts -Name 'scopeWindow' -Minimum 0
+    }
+}
+
+$roundId = Get-RequiredText -Object $metadata -Name 'roundId'
+$scenario = Get-RequiredText -Object $metadata -Name 'scenario'
+if ($scenario -notin @('same-slot', 'distinct')) { Stop-Blocked "scenario must be same-slot or distinct" }
+$isolatedHistorical = Get-RequiredBoolean -Object $metadata -Name 'isolatedHistorical'
+$historyMirror = Get-RequiredProperty -Object $metadata -Name 'historyMirror'
+$historyMirrorText = $historyMirror | ConvertTo-Json -Compress -Depth 6
+if ([string]::IsNullOrWhiteSpace($historyMirrorText) -or $historyMirrorText -match '"<[^>]+>"') {
+    Stop-Blocked "run metadata 'historyMirror' is empty or still contains a placeholder"
+}
+$redisExpectedHealthy = Get-RequiredBoolean -Object $metadata -Name 'redisExpectedHealthy'
+$redisObserved = Get-RequiredText -Object $metadata -Name 'redisObserved'
+$validSeedAttested = Get-RequiredBoolean -Object $metadata -Name 'validSeedAttested'
+$threads = Get-RequiredLong -Object $metadata -Name 'threads' -Minimum 1
+$rampSeconds = Get-RequiredLong -Object $metadata -Name 'rampSeconds' -Minimum 0
+$loops = Get-RequiredLong -Object $metadata -Name 'loops' -Minimum 1
+if ($threads -ne 100 -or $rampSeconds -ne 1 -or $loops -ne 1) {
+    Stop-Blocked 'thread/ramp/loop contract must be exactly 100/1/1'
+}
+$baseUrl = Get-RequiredText -Object $metadata -Name 'baseUrl'
+try { $baseUri = [uri]$baseUrl } catch { Stop-Blocked 'baseUrl must be an absolute URI' }
+if (-not $baseUri.IsAbsoluteUri -or $baseUri.Scheme -notin @('http', 'https') -or
+    $baseUri.Host -notin @('127.0.0.1', 'localhost', '::1') -or $baseUri.AbsolutePath -ne '/' -or
+    $baseUri.Query -or $baseUri.UserInfo -or $baseUri.Fragment) {
+    Stop-Blocked 'baseUrl must be a root loopback http/https URL without query, userinfo, or fragment'
+}
+$jmeterVersion = Get-RequiredText -Object $metadata -Name 'jmeterVersion'
+$dockerVersion = Get-RequiredText -Object $metadata -Name 'dockerVersion'
+$gitHead = Get-RequiredText -Object $metadata -Name 'gitHead'
+if ($gitHead -notmatch '^[0-9a-fA-F]{7,40}$') { Stop-Blocked 'gitHead must be a 7-40 character hexadecimal revision' }
+$jmeterExitCode = Get-RequiredLong -Object $metadata -Name 'jmeterExitCode' -Minimum 0
+$preCounts = Get-RequiredCounts -Object $metadata -Name 'preCounts'
+$postCounts = Get-RequiredCounts -Object $metadata -Name 'postCounts'
 
 function Redact {
     param([AllowEmptyCollection()][string[]]$Secrets, [string]$Text)
@@ -150,9 +236,8 @@ $latencies = New-Object System.Collections.Generic.List[double]
 $firstPerClass = @{}
 foreach ($s in $samples) {
     $body = ''
-    if ($s.SelectSingleNode('responseData') -and $s.SelectSingleNode('responseData').'#text') {
-        $body = [string]$s.SelectSingleNode('responseData').'#text'
-    }
+    $bodyNode = $s.SelectSingleNode('responseData')
+    if ($bodyNode) { $body = [string]$bodyNode.InnerText }
     $transportFailed = ([string]$s.s -eq 'false')
     $class = Classify-Sample -ResponseCode ([string]$s.rc) -TransportFailed $transportFailed -Body $body
     $classes[$class]++
@@ -195,26 +280,61 @@ $stats = [ordered]@{
 }
 
 # ---- Round semantics ----------------------------------------------------------------
-$scenario   = [string]$metadata.scenario
-$isBaseline = ([string]$metadata.roundId -eq 'vulnerable-baseline')
+$isBaseline = ($roundId -eq 'vulnerable-baseline')
 # STRICT AND: both the expectation AND the observation are required.
-$protectedRedis = ([bool]$metadata.redisExpectedHealthy -and ([string]$metadata.redisObserved -eq 'healthy'))
-$validSeed      = [bool]$metadata.validSeedAttested
+$protectedRedis = ($redisExpectedHealthy -and $redisObserved -eq 'healthy')
+$validSeed      = $validSeedAttested
 
-function Get-CountValue { param($Obj, [string]$Key) if ($Obj -and $Obj.PSObject.Properties[$Key]) { [long]$Obj.$Key } else { [long]-999999 } }
-$preB = Get-CountValue $metadata.preCounts 'bookingTotal';  $postB = Get-CountValue $metadata.postCounts 'bookingTotal'
-$preS = Get-CountValue $metadata.preCounts 'slotTotal';     $postS = Get-CountValue $metadata.postCounts 'slotTotal'
-$deltaB = if ($preB -ge 0 -and $postB -ge 0) { $postB - $preB } else { -999999 }
-$deltaS = if ($preS -ge 0 -and $postS -ge 0) { $postS - $preS } else { -999999 }
+$preB = [long]$preCounts.bookingTotal; $postB = [long]$postCounts.bookingTotal
+$preS = [long]$preCounts.slotTotal; $postS = [long]$postCounts.slotTotal
+$preW = [long]$preCounts.scopeWindow; $postW = [long]$postCounts.scopeWindow
+$deltaB = $postB - $preB
+$deltaS = $postS - $preS
+$deltaW = $postW - $preW
+
+$slotsValue = $null
+if ($scenario -eq 'same-slot') {
+    $slotsValue = Get-RequiredLong -Object $metadata -Name 'slotsPerBooking' -Minimum 1
+}
 
 $results = [ordered]@{
     runDir = $RunDir
-    roundId = $metadata.roundId
+    roundId = $roundId
     scenario = $scenario
+    execution = [ordered]@{
+        threads = $threads
+        rampSeconds = $rampSeconds
+        loops = $loops
+        slotsPerBooking = $slotsValue
+        jmeterExitCode = $jmeterExitCode
+        jmeterExitOk = ($jmeterExitCode -eq 0)
+    }
+    environment = [ordered]@{
+        baseUrl = $baseUrl
+        jmeterVersion = $jmeterVersion
+        dockerVersion = $dockerVersion
+        gitHead = $gitHead
+        historyMirror = $historyMirror
+        isolatedHistorical = $isolatedHistorical
+        redisExpectedHealthy = $redisExpectedHealthy
+        redisObserved = $redisObserved
+        validSeedAttested = $validSeedAttested
+    }
     classification = $classes
     latency = $stats
     firstSamplePerClass = $firstPerClass
-    rowDeltas = [ordered]@{ booking = $deltaB; booking_slot = $deltaS }
+    database = [ordered]@{
+        preCounts = $preCounts
+        postCounts = $postCounts
+        rowDeltas = [ordered]@{ booking = $deltaB; booking_slot = $deltaS; scopeWindow = $deltaW }
+    }
+    evidence = [ordered]@{
+        rawJtl = 'results.xml'
+        jmeterLog = 'jmeter.log'
+        runMetadata = 'run-metadata.json'
+        databasePreCounts = 'run-metadata.json#preCounts'
+        databasePostCounts = 'run-metadata.json#postCounts'
+    }
 }
 
 if ($scenario -eq 'same-slot' -and $isBaseline) {
@@ -226,12 +346,7 @@ if ($scenario -eq 'same-slot' -and $isBaseline) {
     $results.assertion = 'NONE - distinct scenario reports distribution only; no 1/99 contract and no row-delta ratio rule.'
     $results.pass = $null
 } elseif ($scenario -eq 'same-slot' -and $protectedRedis -and $validSeed) {
-    $slotsRaw = $metadata.PSObject.Properties['slotsPerBooking']
-    $slotsOk = $false; $slotsValue = 0
-    if ($slotsRaw -and $null -ne $metadata.slotsPerBooking) {
-        [void][long]::TryParse([string]$metadata.slotsPerBooking, [ref]$slotsValue)
-        if ($slotsValue -gt 0) { $slotsOk = $true }
-    }
+    $slotsOk = ($null -ne $slotsValue -and $slotsValue -gt 0)
     $oneSuccess  = ($classes.success -eq 1)
     $ninetyNine  = ($classes.business_conflict -eq 99)
     $noBusy      = ($classes.system_busy -eq 0)
@@ -259,6 +374,13 @@ if ($scenario -eq 'same-slot' -and $isBaseline) {
     $results.pass = $null
 }
 
+# Preserve an auditable report for an aborted/non-zero JMeter run, but never let
+# otherwise-good samples turn that execution into PASS or report-only success.
+if ($jmeterExitCode -ne 0) {
+    $results.executionFailure = "JMeter exited non-zero ($jmeterExitCode); samples are retained for diagnosis only."
+    $results.pass = $false
+}
+
 $reportJson = Redact -Secrets @($token) -Text ($results | ConvertTo-Json -Depth 6)
 Set-Content -LiteralPath (Join-Path $ReportDir 'report.json') -Value $reportJson -Encoding utf8NoBOM
 
@@ -270,7 +392,13 @@ $md = [System.Text.StringBuilder]::new()
 foreach ($k in $classes.Keys) { [void]$md.AppendLine("| $k | $($classes[$k]) |") }
 [void]$md.AppendLine()
 [void]$md.AppendLine("latency: count=$($stats.count) avg=$($stats.avgMs)ms p95=$($stats.p95Ms)ms p99=$($stats.p99Ms)ms")
-[void]$md.AppendLine("row deltas: booking=$deltaB booking_slot=$deltaS")
+[void]$md.AppendLine("execution: threads=$threads rampSeconds=$rampSeconds loops=$loops slotsPerBooking=$slotsValue jmeterExitCode=$jmeterExitCode jmeterExitOk=$($jmeterExitCode -eq 0)")
+[void]$md.AppendLine("environment: baseUrl=$baseUrl jmeter=$jmeterVersion docker=$dockerVersion gitHead=$gitHead")
+[void]$md.AppendLine("round: historyMirror=$historyMirrorText isolatedHistorical=$isolatedHistorical redisExpectedHealthy=$redisExpectedHealthy redisObserved=$redisObserved validSeedAttested=$validSeedAttested")
+[void]$md.AppendLine("pre counts: booking=$preB booking_slot=$preS scopeWindow=$preW")
+[void]$md.AppendLine("post counts: booking=$postB booking_slot=$postS scopeWindow=$postW")
+[void]$md.AppendLine("row deltas: booking=$deltaB booking_slot=$deltaS scopeWindow=$deltaW")
+[void]$md.AppendLine('evidence: results.xml | jmeter.log | run-metadata.json#preCounts | run-metadata.json#postCounts')
 [void]$md.AppendLine("verdictScope: $($results.verdictScope); pass: $($results.pass)")
 [void]$md.AppendLine("assertion: $($results.assertion | ConvertTo-Json -Compress)")
 Set-Content -LiteralPath (Join-Path $ReportDir 'report.md') `

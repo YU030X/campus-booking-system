@@ -4,8 +4,9 @@
     T13 lane E: run ONE concurrency round of deploy/jmeter/booking-concurrency.jmx
     against a strictly local stack and capture classified-later evidence.
 .DESCRIPTION
-    STATIC PLAN - default is PLAN MODE. Pass -Execute to actually invoke jmeter
-    (tasks 3.1-3.4 remain unchecked until real runs; nothing has ever run).
+    Default is PLAN MODE. Pass -Execute to actually invoke jmeter. The offline
+    contract suite covers plan/safety/report logic only; no real JMeter round has
+    run and the three-round report gate remains unchecked.
 
     Safety and correctness contract (static review only):
       * BaseUrl per round must be loopback (127.0.0.1 / localhost / ::1) with

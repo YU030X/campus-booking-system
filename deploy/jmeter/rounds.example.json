@@ -1,5 +1,5 @@
 {
-  "$comment": "T13 slice 3 rounds config TEMPLATE. Placeholders only - NEVER put real secrets, tokens, passwords or production hosts here. Copy to a run-specific config and fill <...> placeholders from an approved fixture. distinct.csvPath points at a RUNTIME-GENERATED 100-row CSV (token,resourceId,startTime,endTime; 4 fields; no header); such CSVs are runtime artifacts, never committed. Static template; no round in this file has ever been executed.",
+  "$comment": "T13 slice 3 rounds config TEMPLATE. Placeholders only - NEVER put real secrets, tokens, passwords or production hosts here. Copy to a run-specific config and fill <...> placeholders from an approved fixture. distinct.csvPath points at a RUNTIME-GENERATED 100-row CSV (token,resourceId,startTime,endTime; 4 fields; no header); such CSVs are runtime artifacts, never committed. The template is covered by offline contract tests; no round in this file has been executed by JMeter.",
   "jmeter": {
     "targetVersion": "5.6.3"
   },

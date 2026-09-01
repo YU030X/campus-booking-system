@@ -106,6 +106,9 @@ if ($Mode -eq 'Check') {
     if ($LASTEXITCODE -ne 0) { [void]$failures.Add('Node redaction contract test') }
     $jmx = Join-Path $repoRoot 'deploy\jmeter\booking-concurrency.jmx'
     try { [xml](Get-Content -LiteralPath $jmx -Raw) | Out-Null } catch { [void]$failures.Add("JMX XML: $jmx") }
+    $jmeterContract = Join-Path $repoRoot 'deploy\jmeter\contract-tests.ps1'
+    & pwsh -NoProfile -File $jmeterContract -RunId "static-$RunId" *> $null
+    if ($LASTEXITCODE -ne 0) { [void]$failures.Add('JMeter offline contract tests') }
     Push-Location $repoRoot
     try { git diff --check *> $null; if ($LASTEXITCODE -ne 0) { [void]$failures.Add('git diff --check') } } finally { Pop-Location }
     if ($failures.Count -gt 0) {
@@ -114,7 +117,7 @@ if ($Mode -eq 'Check') {
         Write-Warning "STATIC CHECK FAILED: $detail"
         exit 1
     }
-    Write-Result -ExitCode 0 -Status 'STATIC_ONLY_OK' -Detail 'Parser, Node, JMX XML, and git diff checks passed; runtime gates remain unexecuted.'
+    Write-Result -ExitCode 0 -Status 'STATIC_ONLY_OK' -Detail 'Parser, Node, JMX XML, JMeter offline contracts, and git diff checks passed; runtime gates remain unexecuted.'
     Write-Output 'STATIC CHECK OK - this is not runtime evidence.'
     exit 0
 }

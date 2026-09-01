@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  T13 booking concurrency plan (slice 3). STATIC ARTIFACT - never executed.
+  T13 booking concurrency plan (slice 3). Contract-parsed, never JMeter-executed.
   Target: JMeter 5.6.3 CLI (-n). Two ThreadGroups, each gated by an IfController
   bound to a run property; run.ps1 enforces EXACTLY ONE of runSameSlot /
   runDistinct is true per execution, so scenarios can never mix in one JTL.

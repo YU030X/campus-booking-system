@@ -1,6 +1,6 @@
 # T13 验证矩阵
 
-状态：**DRAFT / 部分实测**。T04-T12 已集成且主规格 strict validation 为 21/21；本地构建、四服务运行、backend/frontend、API integration、StudentBrowser、空库迁移、备份恢复和重启持久化均有忽略的原始证据。Redis outage、JMeter、ApprovalBrowser 和外部验收仍为 BLOCKED/NOT RUN。
+状态：**DRAFT / 部分实测**。T04-T12 已集成且主规格 strict validation 为 21/21；本地构建、四服务运行、backend/frontend、API integration、StudentBrowser、空库迁移、备份恢复、重启持久化和 Redis outage 均有忽略的原始证据。JMeter 实现合同已离线通过，但真实三轮、ApprovalBrowser 和外部验收仍为 BLOCKED/NOT RUN。
 
 ## 证据规则
 
@@ -24,7 +24,8 @@
 | backup/restore | `deploy/scripts/backup-restore-check.ps1` | 本地 compose MySQL、显式 RPO/RTO | `deploy/artifacts/t13-backup-restore-20260901-nonzero/` | 隔离 restore DB 12 表定义/checksum/非空代表数据一致；restore≤RTO | PASS：booking 1→1，slots 2→2；2.131s ≤ 14400s；exit 0 |
 | restart persistence | `deploy/scripts/restart-persistence-check.ps1 -Execute` | stack healthy、已备份 | `deploy/artifacts/t13-restart-persistence-20260901-audited/` | API/MySQL/Redis healthy；数据/定义相同；未使用 `down`、`-v` 或删卷 | PASS：fingerprint identical；count diffs empty |
 | Redis outage | `deploy/scripts/redis-failure-check.ps1` | 生成 token、owner-scoped T08 fixture、T07/T12 wiring | `deploy/artifacts/t13-redis-outage-20260901-final/` | T07 409/43000/SYSTEM_BUSY、零 mutation；T12 MySQL fallback；Redis 恢复 | PASS：T07/T12 true；Redis recovered；exit 0 |
-| JMeter protected rounds | `deploy/jmeter/run.ps1` + `summarize.ps1` | valid seed、clean scope、JMeter 5.6.3、healthy Redis | XML JTL、metadata、report | protected same-slot 才能断言 1 success + 99 business conflict + 0 system/data/other errors；baseline/distinct 不套该断言 | 未执行/fixture 阻塞 |
+| JMeter implementation contract | `deploy/jmeter/contract-tests.ps1`（亦由 static gate 调用） | PowerShell 7；无需 JMeter/Docker/HTTP | 合成 JTL、临时 metadata/report（默认清理） | 三轮模板、100/1/1、loopback/baseline/CSV 门、分类、元数据、证据链接、1/99、非零退出、隐私和 fail-closed 全部通过 | PASS：45 assertions；仅实现合同 |
+| JMeter protected rounds | `deploy/jmeter/run.ps1` + `summarize.ps1` | valid seed、clean scope、JMeter 5.6.3、healthy Redis | XML JTL、metadata、report | protected same-slot 才能断言 1 success + 99 business conflict + 0 system/data/other errors；baseline/distinct 不套该断言 | 未执行/JMeter+fixture+history 阻塞 |
 | API integration | `deploy/e2e/run.ps1 -Execute -Mode ApiIntegration` | 隔离 loopback MySQL/Redis、运行时凭据 | `deploy/artifacts/e2e-ApiIntegration-t13-api-integration-pass/` | 固定 37 类全部存在并执行；任何失败非零 | PASS：195/195，37 类，exit 0 |
 | StudentBrowser | `deploy/e2e/run.ps1 -Execute -Mode StudentBrowser` | fixture attestation、T08 runner availability | `deploy/artifacts/e2e-StudentBrowser-t13-student-browser-final/` | 只接受本次新 run；文本残留为零；PNG 人工复核完成后才可发布 | PASS：15/15；52/52 PNG 人工复核；redaction residual 0 |
 | ApprovalBrowser | `deploy/e2e/run.ps1 -Execute -Mode ApprovalBrowser` | 确定性 fixture + owner-approved local executable | command status + reviewed evidence | 当前 OCR-8 未解决；即使命令执行也保持 `EXECUTED_UNPROVEN`，不计 PASS | 未执行/owner 阻塞 |
@@ -36,7 +37,7 @@
 2. 已完成静态入口、runner availability、backend/frontend、Compose config、API integration 与 StudentBrowser。
 3. 已从当前 checkout 构建并运行 API/edge，完成 health/HTTP smoke、空库迁移、backup/restore 和 restart persistence。
 4. Redis outage 已通过；保留失败重跑记录以说明两个 T13 harness 修复，不执行 `down -v`。
-5. 分别执行三轮 JMeter，并离线生成报告；再运行 StudentBrowser。ApprovalBrowser 只有 OCR-8 解决后才进入执行。
+5. JMeter 离线实现合同已通过；取得 JMeter 5.6.3、fixture 与两份历史镜像后再分别执行真实三轮并生成报告。ApprovalBrowser 只有 OCR-8 解决后才进入执行。
 6. 扫描所有 artifacts，人工复核截图，更新 evidence index；所有未运行或 blocked 门禁保持 Draft。
 7. 外部部署仅在获得明确授权后执行，并单独记录 rollback 与 monitoring 证据。
 

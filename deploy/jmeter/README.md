@@ -1,9 +1,10 @@
-# T13 JMeter Concurrency Slice (planning artifacts)
+# T13 JMeter Concurrency Slice
 
-> STATUS: **static only**. The plan, config template and scripts have never been
-> executed: no jmeter, docker, or parser invocation has happened from this
-> branch. tasks 3.1–3.4 stay unchecked until real runs produce raw JTL and
-> reports linked here.
+> STATUS: **implementation contract-tested; real load NOT RUN**. The plan,
+> runner safety gates, report schema, classification, privacy boundary, and
+> protected-round assertions pass the offline synthetic-JTL contract suite.
+> JMeter itself has not run and no three-round performance result exists, so
+> task 3.4 remains unchecked.
 
 ## Files
 
@@ -12,9 +13,20 @@
 | `booking-concurrency.jmx` | JMeter 5.6.3 plan; same-slot ThreadGroup with EXACTLY 100 threads (ramp 1, loop 1); distinct resource/date group gated separately; POST `/api/v1/bookings` with contract JSON fields; no Response Assertions (classification is offline) |
 | `rounds.example.json` | three rounds `vulnerable-baseline` / `unique-index-only` / `unique-index-redisson`; placeholders only |
 | `run.ps1` | plan-mode default; `-Execute -RoundId <id>` runs ONE round against a loopback stack; same-slot token via temp secret properties (never argv), distinct via runtime CSV path; captures JTL + pre/post row evidence + env metadata |
-| `summarize.ps1` | pure offline XML JTL classification into mutually exclusive classes (incl. `data_error`); protected-round 1/99/0 + row-delta assertions; redacted digest-only reports |
+| `summarize.ps1` | pure offline XML JTL classification into mutually exclusive classes (incl. `data_error`); fail-closed metadata/evidence validation; protected-round 1/99/0 + row-delta assertions; redacted digest-only reports with environment, pre/post counts and raw-evidence links |
+| `contract-tests.ps1` | offline reusable contract suite; parses JMX/round templates, exercises runner refusal gates, generates synthetic JTL, and validates classification/report/privacy/fail-closed behavior without invoking JMeter, Docker or HTTP |
 
-## Run flow (documented, NOT executed)
+## Offline contract check
+
+```powershell
+pwsh deploy/jmeter/contract-tests.ps1
+```
+
+The suite is also invoked by `pwsh deploy/verify/run.ps1 -Mode Check -Gate
+static`. A PASS proves only the authored harness contract; it is not concurrency
+or latency evidence.
+
+## Real run flow (documented, NOT executed)
 
 ```powershell
 pwsh deploy/jmeter/run.ps1                                   # plan mode: lists rounds
@@ -98,7 +110,8 @@ pwsh deploy/jmeter/run.ps1 -Execute -RoundId vulnerable-baseline -AllowHistorica
   request (OCR-6).
 * **unique-index-only round artifact** (historical image with index but without
   Redisson) is equally missing (OCR-7).
-* JMeter is not installed/verified in this environment; `jmeter --version` has
-  never been run here.
-* XML JTL parsing performance for large runs is untested; if memory becomes an
-  issue the summarize parser will need streaming — noted, not solved.
+* JMeter 5.6.3 is not installed in this environment, so no real JTL has been
+  produced and no `jmeter --version` runtime evidence exists.
+* Synthetic XML JTL parsing is contract-tested. Large real-run XML parsing
+  performance remains untested; if memory becomes an issue the summarizer will
+  need streaming — noted, not solved.
