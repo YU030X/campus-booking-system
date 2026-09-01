@@ -1,8 +1,19 @@
 # T13 Demo Fixture (ephemeral runtime, NOT a migration seed)
 
-> STATUS: **static only.** Nothing in this directory has ever been executed:
-> no API registration, no SQL, no browser run. All demo evidence is DRAFT and
-> `deploy/demo/evidence-index.template.md` is entirely NOT RUN placeholders.
+> STATUS: **implementation contract-tested; real Demo NOT RUN.** No API
+> registration, SQL, browser or teardown runtime has executed. All demo evidence
+> remains DRAFT and `evidence-index.template.md` remains NOT RUN placeholders.
+
+## Offline contract check
+
+```powershell
+pwsh deploy/demo/contract-tests.ps1
+```
+
+The suite exercises only Plan and pre-I/O refusal paths, then statically checks
+the password/temporary-secret/teardown/evidence contracts. A PASS is not fixture
+attestation or Demo acceptance and does not complete tasks 6.1-6.4. The suite is
+also part of `deploy/verify/run.ps1 -Mode Check -Gate static`.
 
 ## What this is (and is not)
 
@@ -26,11 +37,18 @@
 * Scope: usernames derived from the RunId (`t13demo_<runid-with-underscores>*`,
   matching the API username charset), purposes prefixed `T13DEMO:<runid>:`,
   and the demo resource id recorded in `fixture-map.json`.
+* Before its first mutation, Setup queries the exact three usernames, category
+  name, resource name and two purpose strings and requires the whole RunId scope
+  to be empty. A retry/collision is refused for recovery review, never adopted.
 * Teardown deletes children before parents (violation → approval → slot →
   booking → notification/blacklist → time rule → closure → resource → users),
   using EXACT username/purpose lists and the numeric resource id — no LIKE
   wildcards, no database/volume drops, no foreign rows. A pre/post total-count
   record plus leftover checks land in `teardown-evidence.txt`.
+* Before the first delete, Teardown requires distinct mapped booking/user ids and
+  verifies the current database still matches every destructive owner tuple:
+  user id+username, resource id+name+category, and booking id+purpose+student+
+  resource. A numeric but foreign/tampered map is refused with zero deletes.
 * Standalone Teardown requires an explicit fixture map via `-MapPath`; without
   it the mode is BLOCKED. The script never guesses the newest fixture scope.
 
@@ -68,3 +86,9 @@
   with scheduling enabled; if it does not fire within the wait window the run
   records `pending-owner-scan` and does NOT fabricate a violation.
 * Fixture attestation (OCR-5) is a template field only until an owner review.
+* If Setup fails after creating rows but before `fixture-map.json` is written,
+  the current `All`-mode finally block has no complete map and cannot safely
+  auto-compensate those partial rows. Owner review must resolve or explicitly
+  accept a progressive recovery-map/compensation design before attestation or a
+  real Demo run; the exact namespace preflight prevents silent reuse on retry,
+  and the offline suite intentionally does not hide the remaining cleanup gap.

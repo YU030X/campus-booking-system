@@ -34,6 +34,12 @@ OpenSpec apply progress: **24/34 tasks complete**
   row-delta checks, non-zero JMeter exits, privacy and fail-closed inputs. It
   invoked no JMeter, Docker or HTTP request and is not a real three-round
   performance result.
+- Demo tasks 6.1-6.4 remain unchecked, but the authored harness now has a
+  70-assertion offline contract suite covering profile ownership/namespace/wait
+  gates, loopback and attestation refusal, missing/invalid teardown maps,
+  32-byte RNG and temp-secret finally behavior, exact children-first teardown,
+  zero-collision preflight, tamper-resistant owner-tuple teardown, and all-Draft
+  evidence. It invoked no Docker, SQL, HTTP, E2E or browser action.
 - Empty-database migration passes in
   `deploy/artifacts/t13-empty-migration-20260901-final/`: exact MySQL digest,
   two fresh databases, 12 tables, 34 keys, zero rows, identical fingerprints,
@@ -101,7 +107,9 @@ OpenSpec apply progress: **24/34 tasks complete**
    deployment authorization exists (OCR-2). Tasks 8.1-8.3 remain blocked and no
    public URL/TLS claim is allowed.
 5. Demo fixture owner attestation and execution remain absent; tasks 6.1-6.4
-   stay Draft.
+   stay Draft. Additionally, Setup can create partial rows before the complete
+   fixture map exists; its current finally block cannot safely auto-compensate
+   that pre-map failure without a reviewed progressive recovery design.
 
 ## 2026-09-01 system integrity audit
 
@@ -140,9 +148,10 @@ OpenSpec apply progress: **24/34 tasks complete**
   unreachable base `0e53b7e`, while the verified shared base is `2ffae9d`.
   Do not rewrite or check that task without explicit user confirmation.
 - No push has been performed.
-- The tracked worktree was clean at `fbbf649` before the TLS-overlay batch.
+- The tracked worktree was clean at `337277f` before the Demo-contract batch.
 - The JMeter report-schema/synthetic contract-test and optional TLS-overlay
-  implementation batches are complete.
+  implementation batches are complete; the Demo offline contract batch is the
+  current continuation point.
   JMeter/Syft/Trivy/Grype CLIs remain absent; Docker's local SBOM command was
   available and produced the inventories listed above.
 

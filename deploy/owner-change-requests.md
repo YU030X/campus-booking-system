@@ -68,7 +68,11 @@ users, T13-owned approval resource, deterministic PENDING booking, past
 CONFIRMED seed left to the OWNER no-show scan). They remain UNEXECUTED and
 UNATTESTED: `fixtureAttested` stays false until an owner review of the demo
 lifecycle; until then StudentBrowser/E2E consume the fixture only in blocked
-or planning form.
+or planning form. The offline contract suite covers only pre-I/O refusal,
+secret-lifecycle and exact-scope teardown structure. Owner review must also
+resolve or accept the recovery design for a Setup failure that occurs after
+some rows are created but before the complete `fixture-map.json` is written;
+without the map, automatic finally teardown intentionally cannot guess scope.
 
 ## OCR-8 (approval owners): deterministic approval-browser fixture + approved command missing
 

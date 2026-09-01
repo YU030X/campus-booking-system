@@ -3,9 +3,9 @@
 .SYNOPSIS
     T13 slice 5: ephemeral demo fixture lifecycle (Setup / StudentFlow / Teardown).
 .DESCRIPTION
-    STATIC PLAN - default is PLAN MODE. -Execute actually runs the selected mode.
-    Nothing here has ever been executed; all demo evidence remains DRAFT (tasks
-    6.1-6.4 unchecked).
+    Default is PLAN MODE. -Execute actually runs the selected mode. Offline
+    refusal/safety contracts are tested, but no real Demo lifecycle has run; all
+    demo evidence remains DRAFT (tasks 6.1-6.4 unchecked).
 
     Contract (static review only):
       * This is an EPHEMERAL RUNTIME FIXTURE, not a migration seed: rows are
@@ -146,6 +146,24 @@ function Invoke-Api {
 if (-not (Test-Path -LiteralPath $ProfilePath)) { Write-Warning "BLOCKED: demo profile not found: $ProfilePath"; exit 3 }
 $profile0 = Get-Content -LiteralPath $ProfilePath -Raw | ConvertFrom-Json
 if (-not $profile0.publicAccessDenied) { Write-Warning 'REFUSED: publicAccessDenied must be true.'; exit 2 }
+$fixtureOwner = if ($profile0.PSObject.Properties['fixtureOwner']) { [string]$profile0.fixtureOwner } else { '' }
+if ([string]::IsNullOrWhiteSpace($fixtureOwner) -or $fixtureOwner -match '^<.*>$') {
+    Write-Warning 'REFUSED: fixtureOwner must identify the owner-reviewed ephemeral fixture contract.'
+    exit 2
+}
+if (-not $profile0.PSObject.Properties['namespacePrefix'] -or [string]$profile0.namespacePrefix -ne 't13demo') {
+    Write-Warning 'REFUSED: namespacePrefix must remain exactly t13demo.'
+    exit 2
+}
+$waitProperty = $profile0.PSObject.Properties['noShowScanWaitSeconds']
+[long]$noShowWaitValue = 0
+if (-not $waitProperty -or $null -eq $waitProperty.Value -or
+    -not [long]::TryParse([string]$waitProperty.Value, [ref]$noShowWaitValue) -or
+    $noShowWaitValue -lt 0 -or $noShowWaitValue -gt 3600) {
+    Write-Warning 'REFUSED: noShowScanWaitSeconds must be an integer from 0 through 3600.'
+    exit 2
+}
+$script:noShowWait = [int]$noShowWaitValue
 $beUrl = Assert-LocalUrl -Url ([string]$profile0.backendUrl)  -Label 'backendUrl'
 $feUrl = Assert-LocalUrl -Url ([string]$profile0.frontendUrl) -Label 'frontendUrl'
 $composeFile = [string]$profile0.composeFile
@@ -228,6 +246,24 @@ function Invoke-DemoSetup {
         throw 'T08 seed reference file is missing'
     }
 
+    # Refuse namespace collisions before the first mutation. Exact deterministic
+    # names/purposes make the later owner-tuple teardown meaningful; a retry or a
+    # foreign row in the same RunId scope must be recovered/reviewed, never
+    # silently adopted as this run's fixture.
+    $categoryName = ('T13D-' + $RunId)
+    if ($categoryName.Length -gt 50) { $categoryName = $categoryName.Substring(0, 50) }
+    $expectedUsernames = @('admin', 'student', 'intruder') | ForEach-Object { "${userPrefix}_$_" }
+    $expectedUserIn = '(' + (@($expectedUsernames | ForEach-Object { "'$_'" }) -join ', ') + ')'
+    $expectedPurposeIn = "('${purposePrefix}pending', '${purposePrefix}past-confirmed')"
+    $existingUsers = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM ``user`` WHERE username IN $expectedUserIn").Trim()
+    $existingCategory = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource_category WHERE name='$categoryName'").Trim()
+    $existingResource = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM resource WHERE name='$resourceName'").Trim()
+    $existingBookings = (Invoke-RootSql -File $composeFile -Query "SELECT COUNT(*) FROM booking WHERE purpose IN $expectedPurposeIn").Trim()
+    if ($existingUsers -ne '0' -or $existingCategory -ne '0' -or $existingResource -ne '0' -or $existingBookings -ne '0') {
+        Write-Warning 'REFUSED: demo RunId namespace is not empty; recover/review the exact prior scope before retrying.'
+        return 2
+    }
+
     # 2) Register minimal users via the local API (no PII: optional fields null).
     $users = [ordered]@{}
     foreach ($role in @('admin', 'student', 'intruder')) {
@@ -267,8 +303,6 @@ function Invoke-DemoSetup {
 
     # 5) T13-owned category and approval resource via ADMIN API. This avoids
     #    mutating the shared T08 seed scope; the category id is runtime-owned.
-    $categoryName = ('T13D-' + $RunId)
-    if ($categoryName.Length -gt 50) { $categoryName = $categoryName.Substring(0, 50) }
     $catBody = @{ name = $categoryName; parentId = '0'; sortOrder = 0; icon = $null } |
         ConvertTo-Json -Compress
     $cr = Invoke-Api -Method Post -Url "$beUrl/api/v1/admin/categories" `
@@ -490,18 +524,47 @@ function Invoke-DemoTeardown {
     foreach ($bookingId in $bookingIds) {
         if ($bookingId -notmatch '^\d+$') { Write-Warning 'REFUSED: fixture map booking ids must be numeric.'; return 2 }
     }
+    if (@($bookingIds | Select-Object -Unique).Count -ne 2) {
+        Write-Warning 'REFUSED: fixture map booking ids must be distinct.'
+        return 2
+    }
     $adminId = [string]$map.users.admin.id
     $studId  = [string]$map.users.student.id
     $intrId  = [string]$map.users.intruder.id
     foreach ($v in @($adminId, $studId, $intrId)) {
         if ($v -notmatch '^\d+$') { Write-Warning 'REFUSED: fixture map user ids must be numeric.'; return 2 }
     }
+    if (@(@($adminId, $studId, $intrId) | Select-Object -Unique).Count -ne 3) {
+        Write-Warning 'REFUSED: fixture map user ids must be distinct.'
+        return 2
+    }
     foreach ($u in $usernames) {
         if ($u -notmatch '^[A-Za-z0-9_]{3,50}$' -or $u -notlike "$($map.userPrefix)_*") {
             Write-Warning "REFUSED: fixture map username failed namespace check: '$u'"; return 2
         }
     }
+    if (@($usernames | Select-Object -Unique).Count -ne 3) {
+        Write-Warning 'REFUSED: fixture map usernames must be distinct.'
+        return 2
+    }
     if ($resId -notmatch '^\d+$') { Write-Warning 'REFUSED: fixture map resource id must be numeric.'; return 2 }
+    $categoryId = [string]$map.demoCategoryId
+    if ($categoryId -notmatch '^\d+$') { Write-Warning 'REFUSED: fixture map category id must be numeric.'; return 2 }
+
+    # Validate every destructive root tuple before the first DELETE. Numeric ids
+    # alone are insufficient because a tampered map could otherwise point at a
+    # foreign booking/resource/user. Exact purpose, username and ownership links
+    # must all match the map's deterministic namespace.
+    $ownedUsers = (Invoke-RootSql -File $composeFile -Query ("SELECT COUNT(*) FROM ``user`` WHERE (id={0} AND username='{1}') OR (id={2} AND username='{3}') OR (id={4} AND username='{5}')" -f `
+        $adminId, $usernames[0], $studId, $usernames[1], $intrId, $usernames[2])).Trim()
+    $ownedResource = (Invoke-RootSql -File $composeFile -Query ("SELECT COUNT(*) FROM resource r JOIN resource_category c ON c.id=r.category_id WHERE r.id={0} AND r.name='{1}' AND c.id={2} AND c.name='{3}'" -f `
+        $resId, $resourceNameFromMap, $categoryId, $categoryNameFromMap)).Trim()
+    $ownedBookings = (Invoke-RootSql -File $composeFile -Query ("SELECT COUNT(*) FROM booking WHERE (id={0} AND purpose='{1}' AND user_id={2} AND resource_id={3}) OR (id={4} AND purpose='{5}' AND user_id={2} AND resource_id={3})" -f `
+        $bookingIds[0], $purposes[0], $studId, $resId, $bookingIds[1], $purposes[1])).Trim()
+    if ($ownedUsers -ne '3' -or $ownedResource -ne '1' -or $ownedBookings -ne '2') {
+        Write-Warning 'REFUSED: fixture map ownership tuples do not match current database rows; zero teardown deletes executed.'
+        return 2
+    }
 
     $preTotals = Invoke-RootSql -File $composeFile -Query 'SELECT (SELECT COUNT(*) FROM booking), (SELECT COUNT(*) FROM `user`)'
 
@@ -525,8 +588,6 @@ function Invoke-DemoTeardown {
     $null = Invoke-RootSql -File $composeFile -Query "DELETE FROM resource_time_rule WHERE resource_id = $resId"
     $null = Invoke-RootSql -File $composeFile -Query "DELETE FROM resource_closure WHERE resource_id = $resId"
     $null = Invoke-RootSql -File $composeFile -Query "DELETE FROM resource WHERE id = $resId AND name = '$resourceNameFromMap'"
-    $categoryId = [string]$map.demoCategoryId
-    if ($categoryId -notmatch '^\d+$') { Write-Warning 'REFUSED: fixture map category id must be numeric.'; return 2 }
     $null = Invoke-RootSql -File $composeFile -Query "DELETE FROM resource_category WHERE id = $categoryId AND name = '$categoryNameFromMap'"
     $null = Invoke-RootSql -File $composeFile -Query "DELETE FROM ``user`` WHERE username IN $userIn"
 
@@ -551,7 +612,6 @@ function Invoke-DemoTeardown {
 
 # ---- Orchestration --------------------------------------------------------------
 $script:secret = $null
-$script:noShowWait = [int]$profile0.noShowScanWaitSeconds
 $modeResults = [ordered]@{}
 $modesToRun = @()
 switch ($Mode) {

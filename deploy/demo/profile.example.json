@@ -1,5 +1,5 @@
 {
-  "$comment": "T13 slice 5 demo profile TEMPLATE. Ephemeral runtime fixture ONLY - this is NOT a migration seed and nothing here is committed into the database lifecycle. Placeholders <...> must be expanded before Execute. Credential VALUES never appear here: only env NAMES. Loopback-only; publicAccessDenied must stay true. Static template; never executed.",
+  "$comment": "T13 slice 5 demo profile TEMPLATE. Ephemeral runtime fixture ONLY - this is NOT a migration seed and nothing here is committed into the database lifecycle. Placeholders <...> must be expanded before Execute. Credential VALUES never appear here: only env NAMES. Loopback-only; publicAccessDenied must stay true. Offline contract-tested; never executed as a real fixture.",
   "publicAccessDenied": true,
   "frontendUrl": "http://127.0.0.1:4173",
   "backendUrl": "http://127.0.0.1:18080",
