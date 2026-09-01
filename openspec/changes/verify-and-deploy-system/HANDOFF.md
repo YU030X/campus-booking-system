@@ -2,7 +2,7 @@
 
 Date: 2026-09-01
 Branch: `codex/verify-and-deploy-system`  
-Implementation baseline: `a31ac1e fix: close Docker recovery gates`
+Implementation baseline: `7b336f4 test: validate offline image scan evidence`
 Worktree: `D:\Projects\project1_campus\target\worktrees\verify-and-deploy-system`  
 Status: **DRAFT / partially accepted; do not archive**
 OpenSpec apply progress: **24/34 tasks complete**
@@ -27,6 +27,13 @@ OpenSpec apply progress: **24/34 tasks complete**
   `deploy/artifacts/t13-local-sbom-20260901/api.syft.json` and
   `deploy/artifacts/t13-local-sbom-20260901/edge.syft.json`. These are ignored
   package inventories only; they are not vulnerability/CVE scan results.
+- The committed `deploy/scan/` validator passes 28 offline synthetic
+  assertions for Trivy/Grype report structure, relative/non-reparse paths,
+  hashes, fresh database metadata, image ID/reference/optional digest binding,
+  exact severity counts, scan completion/exit codes, and fail-closed decisions.
+  Its Environment action invoked no scanner, Docker daemon, registry, advisory
+  service, or network and recorded `BLOCKED_NO_OFFLINE_SCANNER_DB`. This proves
+  validator behavior and the local blocker only, not image safety or a CVE scan.
 - JMeter tasks 3.1-3.3 are implementation-complete and offline contract-tested.
   `deploy/jmeter/contract-tests.ps1` passed 45 assertions covering the three
   round template, 100/1/1 groups, loopback/baseline/CSV gates, strict response
@@ -41,6 +48,11 @@ OpenSpec apply progress: **24/34 tasks complete**
   zero-collision preflight, pre-mutation recovery scope, tamper-resistant
   owner-tuple teardown, and all-Draft evidence. It invoked no Docker, SQL, HTTP,
   E2E or browser action.
+- Demo hardening is committed through `86de80c`: Setup performs an exact
+  zero-collision preflight before mutation, writes a non-secret recovery scope
+  before mutation, and Teardown validates unique numeric IDs plus exact
+  user/resource/booking owner tuples before issuing any DELETE. It deliberately
+  refuses ambiguous cleanup instead of guessing ownership.
 - Empty-database migration passes in
   `deploy/artifacts/t13-empty-migration-20260901-final/`: exact MySQL digest,
   two fresh databases, 12 tables, 34 keys, zero rows, identical fingerprints,
@@ -75,8 +87,10 @@ OpenSpec apply progress: **24/34 tasks complete**
   redaction residual is zero. All 52/52 screenshots were manually reviewed;
   they contain generated `t08qa_*` QA data only, password inputs are masked,
   and no real PII, secret, cookie, or token is visible.
-- Final static gate, change strict validation, main-spec strict validation, and
-  `git diff --check` pass.
+- The combined static gate now includes JMeter, Demo, and image-scan offline
+  contracts and passes on the committed scan batch. Strict change validation,
+  main-spec validation 21/21, the focused scan contract, sensitive-format scan,
+  and `git diff --check` also pass.
 
 ## Owner fixes integrated during acceptance
 
@@ -91,6 +105,13 @@ OpenSpec apply progress: **24/34 tasks complete**
 - T13 commit `a31ac1e`: closes the local Docker image, empty-migration,
   backup/restore, restart-persistence, and Redis-outage gates and records the
   corresponding evidence and fail-closed harness checks.
+- T13 commits `4416e2f` and `86de80c`: harden the Demo orchestration contract,
+  pre-mutation collision/recovery behavior, and owner-attested teardown. These
+  are offline contract improvements only; they do not complete tasks 6.1-6.4.
+- T13 commit `7b336f4`: adds the offline Trivy/Grype evidence validator, 28-case
+  synthetic contract suite, read-only local environment blocker, static-gate
+  integration, and truthful task/matrix documentation. It does not complete the
+  real scan portion of task 7.4.
 
 ## Remaining blockers — keep tasks unchecked
 
@@ -101,9 +122,12 @@ OpenSpec apply progress: **24/34 tasks complete**
 2. ApprovalBrowser lacks an owner-attested deterministic fixture and approved
    executable (OCR-8). Direct StudentBrowser evidence does not satisfy the
    approval-path half of task 2.4.
-3. Remote vulnerability/dependency scanning is not run. Fixed local base
+3. Vulnerability/dependency scanning is not run. A local audit found Docker
+   Scout v1.20.4 and its cached SBOM, but no local advisory/CVE database and no
+   documented offline-CVE mode. Trivy, Grype, Syft CLI and OSV-Scanner are not
+   installed; only package-manager manifests were found. Fixed local base
    RepoDigests, application image IDs, and local Syft-format SBOM inventories are
-   recorded, but no external scanner or CVE result is claimed.
+   recorded, but no scanner result or CVE claim exists. Task 7.4 stays unchecked.
 4. No host/domain, DNS ownership, TLS mechanism, credentials, or external
    deployment authorization exists (OCR-2). Tasks 8.1-8.3 remain blocked and no
    public URL/TLS claim is allowed.
@@ -149,20 +173,32 @@ OpenSpec apply progress: **24/34 tasks complete**
 - The T12 change still has one governance confirmation open: task 0.1 names the
   unreachable base `0e53b7e`, while the verified shared base is `2ffae9d`.
   Do not rewrite or check that task without explicit user confirmation.
-- No push has been performed.
-- The tracked worktree was clean at `337277f` before the Demo-contract batch.
-- The JMeter report-schema/synthetic contract-test and optional TLS-overlay
-  implementation batches are complete; the Demo offline contract batch is the
-  current continuation point.
-  JMeter/Syft/Trivy/Grype CLIs remain absent; Docker's local SBOM command was
-  available and produced the inventories listed above.
+- The implementation baseline is `7b336f4`; the only follow-up change is this
+  handoff refresh. No push has been performed.
+- The scan batch contains `run.ps1`, `contract-tests.ps1`, README guidance and an
+  example manifest intended to validate owner-supplied offline Trivy/Grype JSON
+  evidence. It has been parsed, contract-tested (28 assertions), integrated into
+  the passing static gate, and independently reviewed. Review findings on
+  reparse-point escape, malformed zero-finding reports, image-reference binding,
+  optional digest wording, Scout plugin invocation, and execution-log credential
+  screening were fixed. It is committed but must not be cited as real scan
+  evidence.
+- The JMeter report-schema/synthetic contract-test, optional TLS-overlay, and
+  Demo offline contract batches are committed. JMeter/Trivy/Grype/OSV-Scanner
+  CLIs remain absent; Docker's local SBOM command was available and produced the
+  inventories listed above, while Docker Scout lacks a locally verified advisory
+  database.
 
 ## Safe continuation order
 
-1. Obtain JMeter plus owner-provided historical/fixture artifacts before any
+1. Obtain a supported local scanner plus fresh advisory database, or separately
+   authorize a controlled network-backed scanner/database workflow, before any
+   real vulnerability claim. Validate both API/edge evidence bundles with
+   `deploy/scan/run.ps1`; do not substitute SBOM or synthetic contracts.
+2. Obtain JMeter plus owner-provided historical/fixture artifacts before any
    concurrency execution. Never fabricate weakened migrations or mock results.
-2. Obtain the ApprovalBrowser owner contract before executing that lane.
-3. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
+3. Obtain the ApprovalBrowser owner contract before executing that lane.
+4. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
    evidence; rerun both strict OpenSpec validations and `git diff --check`.
-4. Sync/archive only after every required local gate is complete. External
+5. Sync/archive only after every required local gate is complete. External
    acceptance remains a separate authorization gate.
