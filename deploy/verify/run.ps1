@@ -10,7 +10,7 @@
     External acceptance is deliberately not an executable gate here.
 
     Gate names:
-      static, compose-config, backend, frontend, empty-migration, backup-restore,
+      static, compose-config, tls-overlay-config, backend, frontend, empty-migration, backup-restore,
       restart-persistence, redis-failure, jmeter, student-browser, approval-browser
 
     Exit codes: 0 passed executed check | 1 executed failure | 2 refused |
@@ -20,7 +20,7 @@
 param(
     [ValidateSet('Plan', 'List', 'Check', 'Run')]
     [string]$Mode = 'Plan',
-    [ValidateSet('static', 'compose-config', 'backend', 'frontend', 'empty-migration',
+    [ValidateSet('static', 'compose-config', 'tls-overlay-config', 'backend', 'frontend', 'empty-migration',
         'backup-restore', 'restart-persistence', 'redis-failure', 'jmeter',
         'student-browser', 'approval-browser')]
     [string]$Gate = 'static',
@@ -44,6 +44,7 @@ $artifactDir = Join-Path $ArtifactRoot "verify-$Gate-$RunId"
 $gates = [ordered]@{
     static = 'PowerShell parser, Node syntax, JMX XML, ownership/secret path review, git diff check'
     'compose-config' = 'docker compose --env-file deploy/.env -f deploy/compose.yml config'
+    'tls-overlay-config' = 'deploy/scripts/tls-overlay-check.ps1 -Execute (compose config only; no TLS runtime)'
     backend = 'booking-api: mvn verify (JDK 17)'
     frontend = 'booking-web: npm ci; npm run build (repository lockfile)'
     'empty-migration' = 'deploy/scripts/empty-migration-check.ps1'
@@ -207,6 +208,7 @@ if ($Gate -in @('compose-config', 'backend', 'frontend')) {
 $scriptPath = $null
 $arguments = @()
 switch ($Gate) {
+    'tls-overlay-config' { $scriptPath = Join-Path $repoRoot 'deploy\scripts\tls-overlay-check.ps1'; $arguments = @('-Execute') }
     'empty-migration' { $scriptPath = Join-Path $repoRoot 'deploy\scripts\empty-migration-check.ps1' }
     'backup-restore' { $scriptPath = Join-Path $repoRoot 'deploy\scripts\backup-restore-check.ps1' }
     'restart-persistence' { $scriptPath = Join-Path $repoRoot 'deploy\scripts\restart-persistence-check.ps1'; $arguments = @('-Execute') }

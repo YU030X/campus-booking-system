@@ -19,6 +19,7 @@
 | backend verify | `deploy/verify/run.ps1 -Gate Backend` | JDK 17、隔离 MySQL/Redis 或测试所需服务 | `deploy/artifacts/verify-backend-t13-backend-pass/` | 真实退出 0，记录环境版本 | PASS：387/387，0 failure/error/skip |
 | frontend build | `deploy/verify/run.ps1 -Gate Frontend` | `package-lock.json`、Node 版本满足项目要求 | `deploy/artifacts/verify-frontend-t13-frontend-pass/` | clean install/build 真实退出 0；T13 不修改清单 | PASS：`npm ci` + build exit 0 |
 | compose topology/runtime | config + `docker compose up -d --no-build` | 本地未跟踪 env、缓存固定镜像 | `deploy/artifacts/t13-runtime-current-20260901/` | 仅 edge loopback 发布；DB/Redis private；四服务 healthy；SPA/API/limit/timeout 行为符合配置 | PASS：四服务 healthy；200/401/413/504 |
+| optional TLS overlay config | `deploy/verify/run.ps1 -Mode Run -Gate tls-overlay-config -Execute` | Docker Compose CLI；无需真实证书或 daemon | `deploy/artifacts/tls-overlay-t13-tls-overlay-final/` + coordinator result | 仅 edge 发布；443→8443 loopback；证书/私钥 secrets 与只读 tls.conf 挂载；缺路径 fail-closed；结果明确未运行 TLS/HTTPS/public endpoint | PASS：11/11 config assertions；static only |
 | image build/digest | `docker compose ... build --pull=false api edge` + inspect | 固定基础镜像已缓存 | `deploy/artifacts/t13-image-build-20260901-current/` | 当前 checkout 构建成功；base RepoDigests 与非 root 用户记录；无 secret | PASS：API/edge built；四个 base RepoDigest 已记录 |
 | empty migration | `deploy/scripts/empty-migration-check.ps1` | Docker、MySQL 8 digest、两个 disposable scope | `deploy/artifacts/t13-empty-migration-20260901-final/` | 两个 fresh DB 均恰好 12 张 InnoDB/utf8mb4 表、零业务行、34 keys、schema hash 相同 | PASS：exit 0；完整运行元数据已记录 |
 | backup/restore | `deploy/scripts/backup-restore-check.ps1` | 本地 compose MySQL、显式 RPO/RTO | `deploy/artifacts/t13-backup-restore-20260901-nonzero/` | 隔离 restore DB 12 表定义/checksum/非空代表数据一致；restore≤RTO | PASS：booking 1→1，slots 2→2；2.131s ≤ 14400s；exit 0 |
@@ -37,7 +38,7 @@
 2. 已完成静态入口、runner availability、backend/frontend、Compose config、API integration 与 StudentBrowser。
 3. 已从当前 checkout 构建并运行 API/edge，完成 health/HTTP smoke、空库迁移、backup/restore 和 restart persistence。
 4. Redis outage 已通过；保留失败重跑记录以说明两个 T13 harness 修复，不执行 `down -v`。
-5. JMeter 离线实现合同已通过；取得 JMeter 5.6.3、fixture 与两份历史镜像后再分别执行真实三轮并生成报告。ApprovalBrowser 只有 OCR-8 解决后才进入执行。
+5. 可选 TLS overlay 的静态拓扑已通过；真实证书/HTTPS 仍等待 8.1 授权。JMeter 离线实现合同已通过；取得 JMeter 5.6.3、fixture 与两份历史镜像后再分别执行真实三轮并生成报告。ApprovalBrowser 只有 OCR-8 解决后才进入执行。
 6. 扫描所有 artifacts，人工复核截图，更新 evidence index；所有未运行或 blocked 门禁保持 Draft。
 7. 外部部署仅在获得明确授权后执行，并单独记录 rollback 与 monitoring 证据。
 

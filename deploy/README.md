@@ -12,8 +12,10 @@ explicit NOT RUN/BLOCKED states.
 |---|---|---|
 | `api/Dockerfile` | JDK17 multi-stage Maven build → non-root JRE runtime, jar-only copy, port 8080 | built from current checkout; runtime healthy |
 | `web/Dockerfile` | pinned Node builder (`npm ci`, fail-closed on missing lock) + Vite dist served by pinned `nginx-unprivileged` (non-root, 8080) | built from current checkout; runtime healthy |
-| `nginx/default.conf` | 8080 SPA fallback, `/api` → `http://api:8080` prefix-preserve proxy, headers, body limit/timeouts, upstream hiding | local HTTP scenarios verified; TLS remains external-gated |
+| `nginx/default.conf` | 8080 SPA fallback, `/api` → `http://api:8080` prefix-preserve proxy, headers, body limit/timeouts, upstream hiding | local HTTP scenarios verified |
+| `nginx/tls.conf` | optional non-root 8443 TLS server with the same SPA/proxy/security contract and `/run/secrets` certificate paths | static config only; no certificate/HTTPS claim |
 | `compose.yml` | edge/api/mysql8/redis topology, internal backend network, named volumes, healthchecks, restart/logging/mem/cpu bounds, `${VAR:?}` secret gating | config + four-service runtime verified |
+| `compose.tls.yml` | explicit overlay adding edge 443→8443 plus read-only operator cert/key Compose secrets | static config only; inert unless explicitly supplied |
 | `.env.example` | non-secret placeholders only; secrets generated locally into git-ignored `.env` | template |
 | `.gitignore` | keeps a local `deploy/.env` out of Git | active |
 
@@ -53,9 +55,24 @@ editing manifests in T13.
 
 ## Certificates
 
-No key material exists or will be committed. TLS activation is an external-gate
-operation: operator-provided cert/key mounts plus a renewal command recorded in
-`.env.example` comments and this README's gate table above.
+No key material exists or will be committed. `compose.tls.yml` and
+`nginx/tls.conf` implement an optional certificate/key mount contract while
+leaving the default local stack unchanged. The static check uses clearly invalid
+sentinel text files and never starts Nginx:
+
+```powershell
+pwsh deploy/scripts/tls-overlay-check.ps1 -Execute
+```
+
+Supplying real operator files, starting the overlay, publishing beyond loopback,
+validating a domain/HTTPS endpoint, and accepting a renewal command remain the
+external tasks 8.1-8.2. After those inputs are authorized, the operator would
+validate the combined topology before any start:
+
+```bash
+cd deploy
+docker compose --env-file .env -f compose.yml -f compose.tls.yml config --quiet
+```
 
 ## Port safety summary
 
@@ -81,12 +98,14 @@ docker compose --env-file .env down                    # volumes preserved
 | `scripts/backup-restore-check.ps1` | consistent mysqldump → isolated random restore DB → exact-12 + definitions/checksums/aggregates + explicit RPO/RTO threshold | PASS: `t13-backup-restore-20260901-nonzero`; restore 2.131s ≤ RTO 14400s |
 | `scripts/restart-persistence-check.ps1` | volume-preserving restart; all cycled services healthy; schema/count identity | PASS: `t13-restart-persistence-20260901-audited` |
 | `scripts/redis-failure-check.ps1` | T07 fail-closed plus T12 availability MySQL fallback, zero mutation, latency, and Redis recovery | PASS: `t13-redis-outage-20260901-final` |
+| `scripts/tls-overlay-check.ps1` | config-only optional TLS overlay validation using invalid sentinels; no container/certificate/HTTPS/public endpoint | local static gate |
 | `runbooks/recovery.md` | lanes, rollback doctrine, RPO/RTO operator fields, stop conditions | planning doc |
 | `owner-change-requests.md` | resolved historical owner requests plus current external/digest/fixture/concurrency-history blockers | living doc |
 | `jmeter/booking-concurrency.jmx` | 5.6.3 plan; 100-thread same-slot group + distinct granularity group, property-gated, no assertions (offline classification) | authored, never run |
 | `jmeter/rounds.example.json` | three-round template; placeholders only; baseline double-gated | authored, never run |
 | `jmeter/run.ps1` | plan default; one round per execution, deep-validated loopback BaseUrl, same-slot token via temp secret props (never argv) with verified cleanup, distinct via validated 100-row runtime CSV path; pre/post row evidence via container auth | authored, never run |
-| `jmeter/summarize.ps1` | offline XML JTL classification (success/business_conflict/system_busy/server/connection/data_error/other) + strict protected 1/99/0 + slot-delta assertions; digest-only redacted reports | authored, never run |
+| `jmeter/summarize.ps1` | offline XML JTL classification (success/business_conflict/system_busy/server/connection/data_error/other) + strict protected 1/99/0 + slot-delta assertions; digest-only redacted reports | implementation contract-tested; no real JTL |
+| `jmeter/contract-tests.ps1` | parses JMX/template and exercises runner/report/privacy/fail-closed behavior with synthetic JTL only | PASS: 45 assertions; no JMeter/Docker/HTTP |
 | `jmeter/README.md` | flow, JTL privacy/redaction, comparability rules, blockers | planning doc |
 | `e2e/profile.example.json` | isolated loopback E2E profile template; credential ENV NAMES only; public/prod denied | template; ignored runtime instance exercised |
 | `e2e/run.ps1` | Plan default; ApiIntegration (explicit class set, missing class blocks) / StudentBrowser (reuses T08 harness) / ApprovalBrowser (never passes; blocked without owner attestation) / All | API 195/195 + Student 15/15 executed |
@@ -124,4 +143,6 @@ in `finally`. A script is accepted only when its own recorded run exits zero.
   service variables (same values the API consumes). This path is authored but
   MySQL first-init path; changing them later still requires a volume reset.
 - Local Nginx evidence covers SPA/deep route, API proxy, security headers,
-  3 MiB→413, and paused-upstream→504. TLS/certificate mounts remain external-gated.
+  3 MiB→413, and paused-upstream→504. The optional TLS overlay/mount contract is
+  statically testable; real certificate, HTTPS and public acceptance remain
+  external-gated.

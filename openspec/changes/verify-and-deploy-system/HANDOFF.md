@@ -5,7 +5,7 @@ Branch: `codex/verify-and-deploy-system`
 Implementation baseline: `a31ac1e fix: close Docker recovery gates`
 Worktree: `D:\Projects\project1_campus\target\worktrees\verify-and-deploy-system`  
 Status: **DRAFT / partially accepted; do not archive**
-OpenSpec apply progress: **23/34 tasks complete**
+OpenSpec apply progress: **24/34 tasks complete**
 
 ## Completed and verified
 
@@ -54,6 +54,13 @@ OpenSpec apply progress: **23/34 tasks complete**
 - Local Nginx/runtime evidence in `deploy/artifacts/t13-runtime-current-20260901/`
   covers SPA/deep route 200, API proxy 401, security headers, 3 MiB body→413,
   paused upstream→504, and the five non-secret runtime feature flags.
+- Optional TLS mount support is implementation-complete without activating TLS:
+  `compose.tls.yml` and `nginx/tls.conf` add loopback-default 443→8443 plus
+  operator file-backed Compose secrets. The config-only artifact
+  `deploy/artifacts/tls-overlay-t13-tls-overlay-final/result.json` passed all
+  eleven assertions (including missing-path refusal) and explicitly records that
+  no container, real certificate, HTTPS, or public endpoint was tested. Real TLS
+  acceptance remains external.
 - API integration executes the fixed 37-class inventory and passes 195/195:
   `deploy/artifacts/e2e-ApiIntegration-t13-api-integration-pass/`.
 - StudentBrowser passes 15/15 in Chrome 152:
@@ -133,8 +140,9 @@ OpenSpec apply progress: **23/34 tasks complete**
   unreachable base `0e53b7e`, while the verified shared base is `2ffae9d`.
   Do not rewrite or check that task without explicit user confirmation.
 - No push has been performed.
-- The tracked worktree was clean at `0f69b1c` before the JMeter contract batch.
-- The JMeter report-schema and synthetic contract-test batch is complete.
+- The tracked worktree was clean at `fbbf649` before the TLS-overlay batch.
+- The JMeter report-schema/synthetic contract-test and optional TLS-overlay
+  implementation batches are complete.
   JMeter/Syft/Trivy/Grype CLIs remain absent; Docker's local SBOM command was
   available and produced the inventories listed above.
 
