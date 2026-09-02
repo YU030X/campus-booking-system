@@ -152,7 +152,9 @@ OpenSpec apply progress: **24/34 tasks complete**
 
 ## ApprovalBrowser intake batch — reviewed, hardened, committed
 
-- The T13-only ApprovalBrowser intake batch (modified
+- Committed as `371aebe fix: harden approval intake after independent review`
+  (11 files, includes this review record's companion edits to tasks/README/
+  matrix/OCR docs). The T13-only ApprovalBrowser intake batch (modified
   `deploy/e2e/{README.md,inventory.md,profile.example.json,run.ps1}`,
   `deploy/{evidence/verification-matrix.md,owner-change-requests.md,verify/run.ps1}`,
   `openspec/changes/verify-and-deploy-system/tasks.md`, and new
