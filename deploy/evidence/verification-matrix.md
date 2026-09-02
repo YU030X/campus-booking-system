@@ -32,7 +32,8 @@
 | JMeter protected rounds | `deploy/jmeter/run.ps1` + `summarize.ps1` | valid seed、clean scope、JMeter 5.6.3、healthy Redis | XML JTL、metadata、report | protected same-slot 才能断言 1 success + 99 business conflict + 0 system/data/other errors；baseline/distinct 不套该断言 | 未执行/JMeter+fixture+history 阻塞 |
 | API integration | `deploy/e2e/run.ps1 -Execute -Mode ApiIntegration` | 隔离 loopback MySQL/Redis、运行时凭据 | `deploy/artifacts/e2e-ApiIntegration-t13-api-integration-pass/` | 固定 37 类全部存在并执行；任何失败非零 | PASS：195/195，37 类，exit 0 |
 | StudentBrowser | `deploy/e2e/run.ps1 -Execute -Mode StudentBrowser` | fixture attestation、T08 runner availability | `deploy/artifacts/e2e-StudentBrowser-t13-student-browser-final/` | 只接受本次新 run；文本残留为零；PNG 人工复核完成后才可发布 | PASS：15/15；52/52 PNG 人工复核；redaction residual 0 |
-| ApprovalBrowser | `deploy/e2e/run.ps1 -Execute -Mode ApprovalBrowser` | 确定性 fixture + owner-approved local executable | command status + reviewed evidence | 当前 OCR-8 未解决；即使命令执行也保持 `EXECUTED_UNPROVEN`，不计 PASS | 未执行/owner 阻塞 |
+| ApprovalBrowser intake contract | `deploy/e2e/approval-contract-tests.ps1`（亦由 static gate 调用） | PowerShell 7；仅临时 file-writing stub | 临时 manifest/network/PNG（默认清理） | attestation/command/owner-root/reparse-free/可执行类型/位置参数/新鲜目录 fail-closed；严格布尔 cleanup/refresh；路径穿越拒绝；证据文件互异；六个 refresh case、cleanup、safe paths、redaction（含未列扩展名二进制 fail-closed）、PNG marker 完整；畸形 manifest 仍产出 status；完整输出仍不计 PASS | PASS：32 assertions；无 Chrome/SQL/HTTP/T11；仅接入合同 |
+| ApprovalBrowser runtime | `deploy/e2e/run.ps1 -Execute -Mode ApprovalBrowser` | 确定性 fixture + owner-approved root/executable + fresh manifest | command status + redacted network/text + unreviewed screenshots | 当前 OCR-8 未解决；缺任一刷新/cleanup/证据即 contract incomplete；即使结构完整仍保持 `EXECUTED_UNPROVEN`，不计 PASS | 未执行/owner 阻塞 |
 | external acceptance | 任务 8.1-8.2 | 用户授权 host/domain/DNS/TLS/credentials | 部署、HTTPS、public smoke、rollback、monitoring evidence | 所有授权和真实证据齐全；否则必须标记 not run/blocked | 未执行/未授权 |
 
 ## 推荐执行顺序

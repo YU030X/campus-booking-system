@@ -1,8 +1,9 @@
 # T13 Verify and Deploy System — Handoff
 
-Date: 2026-09-01
+Date: 2026-09-02
 Branch: `codex/verify-and-deploy-system`  
 Implementation baseline: `5bcc920 fix: bind Demo teardown to exact ownership`
+Committed branch HEAD before the current Approval batch: `f8dcbea docs: refresh T13 Demo ownership handoff`
 Worktree: `D:\Projects\project1_campus\target\worktrees\verify-and-deploy-system`  
 Status: **DRAFT / partially accepted; do not archive**
 OpenSpec apply progress: **24/34 tasks complete**
@@ -149,16 +150,79 @@ OpenSpec apply progress: **24/34 tasks complete**
   trust boundary, not a credential or protection against an attacker who already
   controls both the database and artifacts.
 
+## ApprovalBrowser intake batch — reviewed, hardened, committed
+
+- The T13-only ApprovalBrowser intake batch (modified
+  `deploy/e2e/{README.md,inventory.md,profile.example.json,run.ps1}`,
+  `deploy/{evidence/verification-matrix.md,owner-change-requests.md,verify/run.ps1}`,
+  `openspec/changes/verify-and-deploy-system/tasks.md`, and new
+  `deploy/e2e/approval-contract-tests.ps1`) completed two independent
+  read-only review passes on 2026-09-02: (1) a security/path/evidence-boundary
+  review and (2) a PowerShell runtime/test-semantics review. The three
+  previously reported defects (Write-Output return pollution, argv splatting
+  position binding, reparse/path walker parameter sets) were re-verified as
+  correctly fixed.
+- Review findings that were fixed before commit:
+  - MAJOR: owner root/executable repository-locality was bypassable via
+    junctions/symlinks; every path component between the executable and the
+    repository root is now reparse-point checked
+    (`Test-ReparseFreeAncestry`), as are the run artifacts and owner-output
+    directories.
+  - MAJOR: `.ps1` owner runners executed in-process and could share session
+    state with the validator; they now run in a separate
+    `pwsh -NoProfile -File` child process, and `.bat`/`.cmd`/interpreter
+    script types are refused outright (only `.exe` and `.ps1` are allowed).
+  - MAJOR: fail-closed redaction silently skipped text files with unlisted
+    extensions; `redact-artifacts.mjs` now classifies every file — extended
+    text set, known binary set recorded as `SKIPPED_BINARY`, and any other
+    extension is sniffed: text-like content is redacted, binary-like content
+    becomes `UNSCANNED_BINARY_UNLISTED_EXT` and fails closed (exit 2).
+  - MAJOR: a structurally incomplete manifest/profile threw under
+    `Set-StrictMode` and aborted without a status file; all JSON property
+    access is now guarded (`Get-JsonValue`) so missing fields degrade to
+    contract errors with `approval-browser-status.json` still written.
+  - MAJOR: the 22-assertion suite never exercised the unsafe-path and
+    cleanup/refresh refusals; six negative scenarios were added (traversal
+    screenshot with the target really existing outside the root,
+    `cleanup.performed=false`, string `"false"`, unscannable binary file,
+    manifest without cases, case missing boolean fields).
+  - MINOR: strict-boolean gates (`Test-StrictTrue`) now back
+    `publicAccessDenied`, fixture attestations, `cleanup.performed`,
+    `refreshObserved`/`apiReloadObserved` (a JSON string `"false"` never
+    passes); the owner-output listing no longer swallows errors
+    (`SilentlyContinue` removed); extra manifest cases' screenshots join the
+    manual-PII-review marker; evidence files must be distinct across cases
+    and the manifest cannot serve as network evidence; malformed-manifest
+    cases degrade to status-file contract errors.
+  - Redaction rules extended with Authorization Basic, api-key/x-api-key
+    headers, raw JWTs (rule + residual check); assertion count is now 32.
+- `deploy/e2e/approval-contract-tests.ps1` passes 32/32 offline assertions
+  using only an ignored local file-writing stub. It invoked no Chrome, Docker,
+  SQL, HTTP, Maven, npm, T11 or other T01-T12 harness. After the fixes, the
+  combined static gate (`deploy/verify/run.ps1 -Mode Check`), strict change
+  validation, main-spec validation 21/21 and `git diff --check` all pass.
+- Leftover ignored debug runs under `deploy/artifacts/approval-contract-debug*`
+  were deleted; committed evidence bundles were not touched.
+- Remaining known (documented, non-blocking) boundaries: extra owner-chosen
+  argv after the two placeholders is passed through (owner-authored input);
+  `-ArtifactRoot` remains operator-consented; the owner process inherits the
+  host environment (`DB_URL`/`REDIS_HOST`). All three are documented in
+  `deploy/e2e/README.md`.
+- The intake contract still cannot self-promote OCR-8 or task 2.4: every
+  executed path stays `EXECUTED_UNPROVEN`/exit 2 and the runtime gate stays
+  `BLOCKED_OWNER_APPROVAL`.
+
 ## Remaining blockers — keep tasks unchecked
 
 1. JMeter 5.6.3 is absent. A current audit of PATH/common caches, Docker images,
    every Git ref/object and stash metadata found no runnable JMeter, vulnerable
    baseline, unique-index-only history, approved valid seed, runtime 100-row CSV,
    JTL or real report (OCR-5/6/7). No three-round performance claim exists.
-2. ApprovalBrowser lacks an owner-attested deterministic fixture and approved
-   executable (OCR-8). `scripts/tests/t11/run.ps1` is a real local candidate with
-   approve/reject evidence, but it is unattested and lacks the required per-state
-   refresh matrix; it was not executed or silently adopted by T13.
+2. ApprovalBrowser lacks an owner-attested deterministic fixture/root/executable
+   and runtime evidence (OCR-8). T11 is only a candidate for an owner change: it
+   still needs generated credentials, finally teardown, complete T13 redaction,
+   and the six-case post-state refresh/API-reload evidence contract. The
+   32-assertion intake suite is offline structure only and does not complete 2.4.
 3. Vulnerability/dependency scanning is not run. A local audit found Docker
    Scout v1.20.4 and its cached SBOM, but no local advisory/CVE database and no
    documented offline-CVE mode. Trivy, Grype, Syft CLI and OSV-Scanner are not
@@ -212,8 +276,9 @@ OpenSpec apply progress: **24/34 tasks complete**
 - The T12 change still has one governance confirmation open: task 0.1 names the
   unreachable base `0e53b7e`, while the verified shared base is `2ffae9d`.
   Do not rewrite or check that task without explicit user confirmation.
-- The committed implementation baseline is `5bcc920`; the only intended follow-up
-  change is this handoff refresh. No push has been performed.
+- The committed implementation baseline is `5bcc920`; the ApprovalBrowser intake
+  batch is now committed after independent review (see the review section for
+  the commit hash). No push has been performed.
 - The scan batch contains `run.ps1`, `contract-tests.ps1`, README guidance and an
   example manifest intended to validate owner-supplied offline Trivy/Grype JSON
   evidence. It has been parsed, contract-tested (28 assertions), integrated into
@@ -231,17 +296,22 @@ OpenSpec apply progress: **24/34 tasks complete**
 
 ## Safe continuation order
 
-1. Obtain explicit owner attestation for the ephemeral Demo fixture before any
+1. DONE (2026-09-02): the ApprovalBrowser intake batch received two independent
+   read-only reviews (security/path/evidence boundary; PowerShell runtime/test
+   semantics), all MAJOR/MINOR findings were fixed, 32/32 assertions plus the
+   combined static gate, both strict validations and `git diff --check` pass,
+   and the batch is committed. Do not execute T11.
+2. Obtain explicit owner attestation for the ephemeral Demo fixture before any
    populated Setup/All execution. If granted, preserve the exact ignored map,
    journal/evidence and manual screenshot review; otherwise tasks 6.1-6.4 stay Draft.
-2. Obtain a supported local scanner plus fresh advisory database, or separately
+3. Obtain a supported local scanner plus fresh advisory database, or separately
    authorize a controlled network-backed scanner/database workflow, before any
    real vulnerability claim. Validate both API/edge evidence bundles with
    `deploy/scan/run.ps1`; do not substitute SBOM or synthetic contracts.
-3. Obtain JMeter plus owner-provided historical/fixture artifacts before any
+4. Obtain JMeter plus owner-provided historical/fixture artifacts before any
    concurrency execution. Never fabricate weakened migrations or mock results.
-4. Obtain the ApprovalBrowser owner contract before executing that lane.
-5. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
+5. Obtain the ApprovalBrowser owner contract before executing that lane.
+6. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
    evidence; rerun both strict OpenSpec validations and `git diff --check`.
-6. Sync/archive only after every required local gate is complete. External
+7. Sync/archive only after every required local gate is complete. External
    acceptance remains a separate authorization gate.

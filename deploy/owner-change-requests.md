@@ -68,11 +68,12 @@ users, T13-owned approval resource, deterministic PENDING booking, past
 CONFIRMED seed left to the OWNER no-show scan). They remain UNEXECUTED and
 UNATTESTED: `fixtureAttested` stays false until an owner review of the demo
 lifecycle; until then StudentBrowser/E2E consume the fixture only in blocked
-or planning form. The 119-assertion offline suite covers pre-I/O refusal,
-secret lifecycle, incremental non-secret owner-tuple journaling, transactional
-partial compensation and exact-scope teardown structure. Journaled tuples are
-revalidated and range-locked in one SERIALIZABLE MySQL transaction;
-unjournaled child rows or any cleanup mismatch cause rollback. A hard
+or planning form. The 184-assertion offline suite covers pre-I/O refusal,
+secret lifecycle, random ownership-tag binding, incremental non-secret exact
+parent/child-ID journaling, transactional partial compensation and full
+exact-set teardown. Journaled tuples and child sets are revalidated and
+range-locked in one SERIALIZABLE MySQL transaction; unjournaled child rows or
+any cleanup mismatch cause rollback. A hard
 interruption/API-response/journal-write
 gap after mutation commit can still leave an unjournaled row, and no real
 compensation run exists. Owner review must explicitly accept that residual
@@ -81,14 +82,32 @@ manual-recovery boundary before attestation.
 ## OCR-8 (approval owners): deterministic approval-browser fixture + approved command missing
 
 The ApprovalBrowser lane (`deploy/e2e/run.ps1`) requires (1)
-`approvalBrowserFixtureAttested: true` and (2) an owner-approved
-`approvalBrowserCommand`/path. Today neither exists: the in-repo T08 harness
-covers student flows only (its 15 cases include no admin approve/reject UI
-flow), and no deterministic approval fixture has been attested. T13 will not
-mock admins, bookings, or browser outcomes. Consequence: ApprovalBrowser is
-BLOCKED (exit 3) by default and can never report pass in this slice even when
-executed (`EXECUTED_UNPROVEN`, exit 2). Also covers the per-state browser
-refresh matrix gap recorded in `deploy/e2e/inventory.md`.
+`approvalBrowserFixtureAttested: true`, (2) a repository-local owner root and
+approved executable, and (3) a fresh owner-output manifest. Today no owner has
+attested these inputs. T08 covers student flows only. A read-only audit found
+`scripts/tests/t11/run.ps1`/`qa-harness.mjs` is a real raw-CDP candidate with
+admin/student fixtures plus approve/reject UI, 401/403/404/409 evidence, PNG and
+network output, but it is not adopted because:
+
+- its credential is fixed in source rather than generated at runtime;
+- approve/reject waits for current DOM changes but does not refresh the route and
+  assert the matching API reload/persisted state;
+- its finally closes Chrome but does not teardown the database fixture;
+- its local redactor does not cover Authorization/cookies/full PII to T13's
+  residual-scan standard.
+
+T13 now has a 32-assertion offline intake contract. It passes a fresh empty
+artifact root via positional RunId/output-root arguments, requires six exact
+refresh case IDs (admin login, pending list, approve, reject, approved student
+detail, rejected student detail), strict-boolean cleanup PASS, distinct
+screenshot+network evidence, safe relative paths and fail-closed redaction
+(including unscannable binary files under unlisted extensions). The owner
+executable must be a repository-local, reparse-free `.exe`, or a `.ps1` run in
+a separate `pwsh -NoProfile -File` child process. Even a structurally complete
+owner output remains `EXECUTED_UNPROVEN`/exit 2 until owner/runtime/manual PNG
+review closes OCR-8. Owner request: update and attest the T11 fixture/runner to
+this contract; T13 will not modify `scripts/tests/**`, mock outcomes, or execute
+the candidate before attestation.
 
 ## OCR-6 (owner/T08 history): vulnerable-baseline image/artifact unavailable
 

@@ -3,9 +3,9 @@
 .SYNOPSIS
     T13 slice 4: integration / E2E execution plan over EXISTING repo test assets.
 .DESCRIPTION
-    STATIC PLAN - default is PLAN MODE. -Execute actually runs the selected mode.
-    Nothing in this lane has ever been executed (tasks 1.4, 2.1-2.5 stay
-    unchecked until real runs).
+    Default is PLAN MODE. -Execute actually runs the selected mode. ApiIntegration
+    and StudentBrowser have recorded local evidence; ApprovalBrowser remains
+    owner-blocked and can never self-promote from an offline/output contract.
 
     Modes:
       ApiIntegration   - narrow, EXPLICITLY LISTED set of existing booking-api
@@ -26,9 +26,15 @@
       ApprovalBrowser  - deterministic approval browser flow. If profile
                          approvalBrowserFixtureAttested is false => BLOCKED
                          (exit 3). Even when true, execution happens ONLY if
-                         profile.approvalBrowserCommand provides an approved
-                         command/path (mocks forbidden). This mode NEVER reports
-                         pass: executed => exit 2 (EXECUTED_UNPROVEN).
+                         a reparse-free, repository-local owner root plus an
+                         approved .exe/.ps1 command exist (.ps1 runs in a
+                         separate pwsh child process; .bat/.cmd refused).
+                         Positional RunId/output-root placeholders, fresh
+                         non-reparse output dir, strict-boolean manifest gates,
+                         six refresh cases, distinct evidence files, cleanup,
+                         safe paths and T13 redaction are fail-closed. This
+                         mode NEVER reports pass: executed => exit 2
+                         (EXECUTED_UNPROVEN).
       All              - Api -> Student -> Approval, in order; any blocked or
                          failing child makes the overall run non-zero.
 
@@ -108,6 +114,14 @@ $script:ApiClasses = @(
     'common/config/RedisRealIntegrationTest'
 )
 $script:ApiClasses = @($script:ApiClasses | Select-Object -Unique)
+$script:ApprovalRequiredCases = @(
+    'admin-login-refresh',
+    'pending-list-refresh',
+    'approve-refresh',
+    'reject-refresh',
+    'student-approved-detail-refresh',
+    'student-rejected-detail-refresh'
+)
 
 # Env contract: DB_URL + REDIS_HOST are hard-required; RESOURCE_MYSQL_URL /
 # USER_CREDIT_MYSQL_URL are DERIVED from DB_URL when absent; REDIS_PORT
@@ -137,40 +151,104 @@ function Assert-LocalUrl {
     return $u
 }
 
+function Test-ReparseFreeAncestry {
+    # True only when every component from StartPath up to (and including)
+    # StopPrefix exists and carries no reparse-point attribute. Blocks
+    # junction/symlink redirection that a string-prefix containment check
+    # cannot see.
+    param([Parameter(Mandatory)][string]$StartPath, [Parameter(Mandatory)][string]$StopPrefix)
+    $current = [System.IO.Path]::GetFullPath($StartPath).TrimEnd('\', '/')
+    $stopFull = [System.IO.Path]::GetFullPath($StopPrefix).TrimEnd('\', '/')
+    while ($true) {
+        if (-not (Test-Path -LiteralPath $current)) { return $false }
+        $item = Get-Item -LiteralPath $current -Force
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+        if ($current -ieq $stopFull) { return $true }
+        $parent = [System.IO.Path]::GetDirectoryName($current)
+        if (-not $parent -or $parent -eq $current) { return $false }
+        $current = $parent
+    }
+}
+
+function Get-JsonValue {
+    # Missing JSON properties must yield $null (contract error), never a
+    # StrictMode PropertyNotFoundException that aborts without a status file.
+    param($Object, [Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Object) { return $null }
+    $prop = $Object.PSObject.Properties[$Name]
+    if ($null -eq $prop) { return $null }
+    return $prop.Value
+}
+
+function Test-StrictTrue {
+    # Only a real JSON boolean true passes. PowerShell casts the string "false"
+    # to [bool]$true, so attestation/cleanup/refresh gates must not use [bool].
+    param($Value)
+    return ($null -ne $Value -and $Value -is [bool] -and $Value)
+}
+
+function Resolve-ApprovalEvidenceFile {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$RelativePath,
+        [Parameter(Mandatory)][string[]]$AllowedExtensions
+    )
+    if ([string]::IsNullOrWhiteSpace($RelativePath) -or [System.IO.Path]::IsPathRooted($RelativePath)) {
+        return $null
+    }
+    $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $candidate = [System.IO.Path]::GetFullPath((Join-Path $Root $RelativePath))
+    if (-not $candidate.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $candidate -PathType Leaf) -or
+        $AllowedExtensions -notcontains [System.IO.Path]::GetExtension($candidate).ToLowerInvariant()) {
+        return $null
+    }
+    $rootItem = Get-Item -LiteralPath $Root -Force
+    if (($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $null }
+    $currentPath = $candidate
+    while ($currentPath.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) {
+        $currentItem = Get-Item -LiteralPath $currentPath -Force
+        if (($currentItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $null }
+        $currentPath = [System.IO.Path]::GetDirectoryName($currentPath)
+    }
+    return $candidate
+}
+
 # ---- Load profile ---------------------------------------------------------------
 if (-not (Test-Path -LiteralPath $ProfilePath)) { Write-Warning "BLOCKED: profile not found: $ProfilePath"; exit 3 }
 $profile0 = Get-Content -LiteralPath $ProfilePath -Raw | ConvertFrom-Json
-if (-not $profile0.publicAccessDenied) {
-    Write-Warning 'REFUSED: profile.publicAccessDenied must be true (public/prod denied by default).'
+if (-not (Test-StrictTrue (Get-JsonValue $profile0 'publicAccessDenied'))) {
+    Write-Warning 'REFUSED: profile.publicAccessDenied must be boolean true (public/prod denied by default).'
     exit 2
 }
-$feUrl = Assert-LocalUrl -Url ([string]$profile0.frontendUrl) -Label 'frontendUrl'
-$beUrl = Assert-LocalUrl -Url ([string]$profile0.backendUrl)  -Label 'backendUrl'
+$null = Assert-LocalUrl -Url ([string](Get-JsonValue $profile0 'frontendUrl')) -Label 'frontendUrl'
+$null = Assert-LocalUrl -Url ([string](Get-JsonValue $profile0 'backendUrl'))  -Label 'backendUrl'
 
 $plan = [ordered]@{
     runId = $RunId
     mode = $Mode
     executed = [bool]$Execute
-    frontendUrl = [string]$profile0.frontendUrl
-    backendUrl = [string]$profile0.backendUrl
-    fixtureAttested = [bool]$profile0.fixtureAttested
-    approvalBrowserFixtureAttested = [bool]$profile0.approvalBrowserFixtureAttested
-    approvalBrowserCommandPresent = [bool]$profile0.approvalBrowserCommand
+    frontendUrl = [string](Get-JsonValue $profile0 'frontendUrl')
+    backendUrl = [string](Get-JsonValue $profile0 'backendUrl')
+    fixtureAttested = (Test-StrictTrue (Get-JsonValue $profile0 'fixtureAttested'))
+    approvalBrowserFixtureAttested = (Test-StrictTrue (Get-JsonValue $profile0 'approvalBrowserFixtureAttested'))
+    approvalBrowserCommandPresent = ($null -ne (Get-JsonValue $profile0 'approvalBrowserCommand'))
     apiClassCount = @($script:ApiClasses).Count
 }
 
 if (-not $Execute) {
     Write-Output 'PLAN MODE - nothing invoked.'
     Write-Output ("mode={0} frontend={1} backend={2} fixtureAttested={3} approvalFixtureAttested={4}" -f `
-        $Mode, $profile0.frontendUrl, $profile0.backendUrl, $profile0.fixtureAttested, $profile0.approvalBrowserFixtureAttested)
+        $Mode, (Get-JsonValue $profile0 'frontendUrl'), (Get-JsonValue $profile0 'backendUrl'), `
+        (Test-StrictTrue (Get-JsonValue $profile0 'fixtureAttested')), (Test-StrictTrue (Get-JsonValue $profile0 'approvalBrowserFixtureAttested')))
     Write-Output ("ApiIntegration narrow set: {0} classes (see deploy/e2e/inventory.md)." -f @($script:ApiClasses).Count)
     Write-Output 'Run with -Execute -Mode <ApiIntegration|StudentBrowser|ApprovalBrowser|All>.'
     exit 0
 }
 
 # ---- Execute-mode preconditions -------------------------------------------------
-$bookingApiDir = [string]$profile0.bookingApiDir
-$t08Dir = [string]$profile0.t08HarnessDir
+$bookingApiDir = [string](Get-JsonValue $profile0 'bookingApiDir')
+$t08Dir = [string](Get-JsonValue $profile0 't08HarnessDir')
 foreach ($p in @($bookingApiDir, $t08Dir)) {
     if (-not $p -or -not (Test-Path -LiteralPath $p -PathType Container)) {
         Write-Warning "BLOCKED: profile path placeholder not expanded to a directory: '$p'"
@@ -191,6 +269,11 @@ if ((Resolve-Path -LiteralPath $t08Dir).Path -ne $expectedT08Dir) {
 }
 $Artifacts = Join-Path $ArtifactRoot "e2e-$Mode-$RunId"
 New-Item -ItemType Directory -Path $Artifacts -Force | Out-Null
+$artifactsItem = Get-Item -LiteralPath $Artifacts -Force
+if (($artifactsItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+    Write-Warning 'REFUSED: artifacts run directory is a reparse point; evidence containment cannot be guaranteed.'
+    exit 2
+}
 
 function Invoke-ApiIntegration {
     # Verify every listed class file exists - a missing class BLOCKS; we never
@@ -214,14 +297,14 @@ function Invoke-ApiIntegration {
         Write-Warning ("BLOCKED: missing required environment variables: {0}" -f ($envMissing -join ', '))
         return 3
     }
-    $cred = $profile0.credentials
-    $dbUser   = [Environment]::GetEnvironmentVariable([string]$cred.dbUsernameEnv)
-    $dbPass   = [Environment]::GetEnvironmentVariable([string]$cred.dbPasswordEnv)
-    $jwtValue = [Environment]::GetEnvironmentVariable([string]$cred.jwtSecretEnv)
+    $cred = Get-JsonValue $profile0 'credentials'
+    $dbUser   = [Environment]::GetEnvironmentVariable([string](Get-JsonValue $cred 'dbUsernameEnv'))
+    $dbPass   = [Environment]::GetEnvironmentVariable([string](Get-JsonValue $cred 'dbPasswordEnv'))
+    $jwtValue = [Environment]::GetEnvironmentVariable([string](Get-JsonValue $cred 'jwtSecretEnv'))
     $credMissing = @()
-    if (-not $dbUser)   { $credMissing += [string]$cred.dbUsernameEnv }
-    if (-not $dbPass)   { $credMissing += [string]$cred.dbPasswordEnv }
-    if (-not $jwtValue) { $credMissing += [string]$cred.jwtSecretEnv }
+    if (-not $dbUser)   { $credMissing += [string](Get-JsonValue $cred 'dbUsernameEnv') }
+    if (-not $dbPass)   { $credMissing += [string](Get-JsonValue $cred 'dbPasswordEnv') }
+    if (-not $jwtValue) { $credMissing += [string](Get-JsonValue $cred 'jwtSecretEnv') }
     if ($credMissing.Count -gt 0) {
         Write-Warning ("BLOCKED: missing credential environment variables: {0}" -f ($credMissing -join ', '))
         return 3
@@ -237,7 +320,7 @@ function Invoke-ApiIntegration {
         'RESOURCE_MYSQL_USERNAME'   = $dbUser
         'RESOURCE_MYSQL_PASSWORD'   = $dbPass
     }
-    $redisPwd = [Environment]::GetEnvironmentVariable([string]$cred.redisPasswordEnv)
+    $redisPwd = [Environment]::GetEnvironmentVariable([string](Get-JsonValue $cred 'redisPasswordEnv'))
     if ($redisPwd) { $mappings['REDIS_PASSWORD'] = $redisPwd }
     foreach ($name in $script:DerivedFromDbUrl) {
         if (-not [Environment]::GetEnvironmentVariable($name)) { $mappings[$name] = $dbUrl }
@@ -281,7 +364,7 @@ function Invoke-ApiIntegration {
 }
 
 function Invoke-StudentBrowser {
-    if (-not $profile0.fixtureAttested) {
+    if (-not (Test-StrictTrue (Get-JsonValue $profile0 'fixtureAttested'))) {
         Write-Warning 'BLOCKED: StudentBrowser requires profile.fixtureAttested=true (deterministic fixture owner-attested).'
         return 3
     }
@@ -349,17 +432,18 @@ function Invoke-StudentBrowser {
 }
 
 function Invoke-ApprovalBrowser {
-    if (-not $profile0.approvalBrowserFixtureAttested) {
+    if (-not (Test-StrictTrue (Get-JsonValue $profile0 'approvalBrowserFixtureAttested'))) {
         Write-Warning 'BLOCKED: ApprovalBrowser requires approvalBrowserFixtureAttested=true (deterministic fixture).'
         return 3
     }
-    if (-not $profile0.approvalBrowserCommand) {
+    $rawCmd = Get-JsonValue $profile0 'approvalBrowserCommand'
+    if (-not $rawCmd) {
         Write-Warning 'BLOCKED: ApprovalBrowser requires profile.approvalBrowserCommand (owner-approved command/path). Mocks are forbidden.'
         return 3
     }
     # Command contract: a JSON ARRAY whose FIRST element is an EXISTING LOCAL
-    # FILE PATH; remaining elements are arguments. Shell command strings and
-    # PATH guessing are forbidden - no `& $string`, no cmd /c.
+    # FILE PATH below an explicit owner root inside this repository. Remaining
+    # elements are argv values. Shell strings/PATH guessing are forbidden.
     $rawCmd = $profile0.approvalBrowserCommand
     if ($rawCmd -is [string] -or $rawCmd -isnot [array]) {
         Write-Warning 'REFUSED: approvalBrowserCommand must be a JSON array like ["<existing local path>", "<arg>", ...].'
@@ -375,17 +459,195 @@ function Invoke-ApprovalBrowser {
         Write-Warning ("REFUSED: approvalBrowserCommand[0] is not an existing local file: '{0}' (PATH guessing forbidden)." -f $exe)
         return 2
     }
-    $rest = @($cmd | Select-Object -Skip 1)
+    $ownerRootRaw = [string](Get-JsonValue $profile0 'approvalBrowserOwnerRoot')
+    if ([string]::IsNullOrWhiteSpace($ownerRootRaw) -or -not (Test-Path -LiteralPath $ownerRootRaw -PathType Container)) {
+        Write-Warning 'BLOCKED: ApprovalBrowser requires an existing owner-approved harness root.'
+        return 3
+    }
+    $repoPrefix = [System.IO.Path]::GetFullPath($repoRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $ownerRoot = (Resolve-Path -LiteralPath $ownerRootRaw).Path
+    $ownerPrefix = [System.IO.Path]::GetFullPath($ownerRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $exeResolved = (Resolve-Path -LiteralPath $exe).Path
+    if (-not $ownerPrefix.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        -not $exeResolved.StartsWith($ownerPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Warning 'REFUSED: ApprovalBrowser executable must be inside the repository-local owner-approved harness root.'
+        return 2
+    }
+    # Prefix checks cannot see junction/symlink redirection: every component
+    # between the executable and the repository root must be a real directory.
+    if (-not (Test-ReparseFreeAncestry -StartPath $exeResolved -StopPrefix $repoRoot)) {
+        Write-Warning 'REFUSED: ApprovalBrowser owner root/executable path contains a reparse point (junction/symlink); repository-locality cannot be proven.'
+        return 2
+    }
+    # .ps1 runs in a SEPARATE pwsh child process (owner code must never share
+    # this session state); .exe runs natively. Batch/script types that PowerShell
+    # or cmd.exe would interpret specially are refused.
+    $exeExt = [System.IO.Path]::GetExtension($exeResolved).ToLowerInvariant()
+    if ($exeExt -notin @('.exe', '.ps1')) {
+        Write-Warning ("REFUSED: ApprovalBrowser executable type '{0}' is not allowed (only .exe and .ps1; .bat/.cmd/interpreter scripts are refused)." -f $exeExt)
+        return 2
+    }
 
-    # Even with all conditions satisfied, this lane CANNOT be marked pass:
-    # no deterministic approval browser proof exists yet (OCR-8).
-    Write-Output ("Executing owner-approved executable: {0}" -f $exe)
-    & $exe @rest 2>&1 |
-        Tee-Object -FilePath (Join-Path $Artifacts 'approval-browser-command.log') | Out-Null
-    $cmdExit = $LASTEXITCODE
-    Set-Content -LiteralPath (Join-Path $Artifacts 'approval-browser-status.txt') `
-        -Value ("EXECUTED_UNPROVEN exit={0}`nThis mode never reports pass until an owner-reviewed deterministic fixture and evidence chain exist (OCR-8)." -f $cmdExit) -Encoding utf8NoBOM
-    Write-Warning 'ApprovalBrowser executed but remains UNPROVEN by contract - not a pass.'
+    $rest = @($cmd | Select-Object -Skip 1 | ForEach-Object { [string]$_ })
+    if ($rest.Count -lt 2 -or $rest[0] -cne '{T13_RUN_ID}' -or $rest[1] -cne '{T13_ARTIFACT_ROOT}' -or
+        @($rest | Where-Object { $_ -ceq '{T13_RUN_ID}' }).Count -ne 1 -or
+        @($rest | Where-Object { $_ -ceq '{T13_ARTIFACT_ROOT}' }).Count -ne 1) {
+        Write-Warning 'REFUSED: approvalBrowserCommand argv[1:2] must be exactly {T13_RUN_ID}, {T13_ARTIFACT_ROOT}, each used once.'
+        return 2
+    }
+    $ownerOutput = Join-Path $Artifacts 'approval-owner-output'
+    if (Test-Path -LiteralPath $ownerOutput) {
+        $ownerOutputItem = Get-Item -LiteralPath $ownerOutput -Force
+        if (-not $ownerOutputItem.PSIsContainer -or
+            (($ownerOutputItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            Write-Warning 'REFUSED: ApprovalBrowser owner output path is not a real local directory.'
+            return 2
+        }
+        # No SilentlyContinue: a failed listing must refuse, never read as empty.
+        if (@(Get-ChildItem -LiteralPath $ownerOutput -Force).Count -gt 0) {
+            Write-Warning 'REFUSED: ApprovalBrowser owner output directory is not empty; stale evidence cannot be reused.'
+            return 2
+        }
+    } else {
+        New-Item -ItemType Directory -Path $ownerOutput -Force | Out-Null
+    }
+    $resolvedArgs = @($rest | ForEach-Object {
+        if ($_ -ceq '{T13_RUN_ID}') { $RunId }
+        elseif ($_ -ceq '{T13_ARTIFACT_ROOT}') { $ownerOutput }
+        else { $_ }
+    })
+
+    $startedAtUtc = [DateTime]::UtcNow
+    $commandLog = Join-Path $Artifacts 'approval-browser-command.log'
+    $cmdExit = 1
+    $redactionExit = 1
+    $commandExceptionType = ''
+    try {
+        Write-Host ("Executing owner-approved executable: {0}" -f $exeResolved)
+        if ($exeExt -eq '.ps1') {
+            & pwsh -NoProfile -File $exeResolved @resolvedArgs 2>&1 |
+                Tee-Object -FilePath $commandLog | Out-Null
+        } else {
+            & $exeResolved @resolvedArgs 2>&1 |
+                Tee-Object -FilePath $commandLog | Out-Null
+        }
+        $cmdExit = $LASTEXITCODE
+    } catch {
+        $commandExceptionType = $_.Exception.GetType().FullName
+        Set-Content -LiteralPath $commandLog -Value 'owner command raised an exception; exception text omitted pending redaction policy' -Encoding utf8NoBOM
+        $cmdExit = 1
+    } finally {
+        & node (Join-Path $PSScriptRoot 'redact-artifacts.mjs') $Artifacts | Out-Null
+        $redactionExit = $LASTEXITCODE
+    }
+
+    $contractErrors = [System.Collections.Generic.List[string]]::new()
+    if ($cmdExit -ne 0) { [void]$contractErrors.Add("owner command exit=$cmdExit") }
+    if ($redactionExit -ne 0) { [void]$contractErrors.Add("redaction exit=$redactionExit") }
+    $manifestPath = Join-Path $ownerOutput 'approval-evidence.json'
+    $manifest = $null
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        [void]$contractErrors.Add('approval-evidence.json missing')
+    } elseif ((Get-Item -LiteralPath $manifestPath).LastWriteTimeUtc -lt $startedAtUtc.AddSeconds(-1)) {
+        [void]$contractErrors.Add('approval-evidence.json is stale')
+    } else {
+        try { $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json } catch {
+            [void]$contractErrors.Add('approval-evidence.json is invalid JSON')
+        }
+    }
+
+    $reviewedScreenshots = [System.Collections.Generic.List[string]]::new()
+    $usedEvidencePaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($null -ne $manifest) {
+        try {
+            if ([string](Get-JsonValue $manifest 'schemaVersion') -cne '1') {
+                [void]$contractErrors.Add('manifest schemaVersion must be 1')
+            }
+            if ([string](Get-JsonValue $manifest 'runId') -cne $RunId) {
+                [void]$contractErrors.Add('manifest runId mismatch')
+            }
+            $cleanup = Get-JsonValue $manifest 'cleanup'
+            if ($null -eq $cleanup -or -not (Test-StrictTrue (Get-JsonValue $cleanup 'performed')) -or
+                [string](Get-JsonValue $cleanup 'status') -cne 'PASS') {
+                [void]$contractErrors.Add('manifest cleanup must be performed/PASS')
+            }
+            $casesRaw = Get-JsonValue $manifest 'cases'
+            $cases = if ($null -eq $casesRaw) { @() } else { @($casesRaw) }
+            $caseIds = @($cases | ForEach-Object { [string](Get-JsonValue $_ 'id') })
+            if (@($caseIds | Where-Object { -not $_ }).Count -gt 0) {
+                [void]$contractErrors.Add('manifest case id missing')
+            }
+            if (@($caseIds | Select-Object -Unique).Count -ne $caseIds.Count) {
+                [void]$contractErrors.Add('manifest case ids must be unique')
+            }
+            foreach ($requiredCase in $script:ApprovalRequiredCases) {
+                $matched = @($cases | Where-Object { [string](Get-JsonValue $_ 'id') -ceq $requiredCase })
+                if ($matched.Count -ne 1) {
+                    [void]$contractErrors.Add("required case missing/duplicated: $requiredCase")
+                    continue
+                }
+                $case = $matched[0]
+                if ([string](Get-JsonValue $case 'status') -cne 'PASS' -or
+                    -not (Test-StrictTrue (Get-JsonValue $case 'refreshObserved')) -or
+                    -not (Test-StrictTrue (Get-JsonValue $case 'apiReloadObserved')) -or
+                    [string](Get-JsonValue $case 'routeAfterRefresh') -notmatch '^/') {
+                    [void]$contractErrors.Add("case contract incomplete: $requiredCase")
+                }
+                $shot = $null
+                $network = $null
+                try {
+                    $shot = Resolve-ApprovalEvidenceFile -Root $ownerOutput -RelativePath ([string](Get-JsonValue $case 'screenshot')) -AllowedExtensions @('.png')
+                    $network = Resolve-ApprovalEvidenceFile -Root $ownerOutput -RelativePath ([string](Get-JsonValue $case 'networkEvidence')) -AllowedExtensions @('.json', '.jsonl')
+                } catch {
+                    [void]$contractErrors.Add("case evidence unresolvable: $requiredCase")
+                    continue
+                }
+                if (-not $shot) { [void]$contractErrors.Add("case screenshot missing/unsafe: $requiredCase") }
+                elseif (-not $usedEvidencePaths.Add($shot)) { [void]$contractErrors.Add("case evidence must be distinct: $requiredCase") }
+                else { [void]$reviewedScreenshots.Add($shot) }
+                if (-not $network) { [void]$contractErrors.Add("case network evidence missing/unsafe: $requiredCase") }
+                elseif ([System.IO.Path]::GetFullPath($network) -eq [System.IO.Path]::GetFullPath($manifestPath)) {
+                    [void]$contractErrors.Add("case network evidence must not be the manifest itself: $requiredCase")
+                }
+                elseif (-not $usedEvidencePaths.Add($network)) { [void]$contractErrors.Add("case evidence must be distinct: $requiredCase") }
+            }
+            # Screenshots of EXTRA manifest cases are never auto-passed either:
+            # every referenced PNG lands in the manual-review marker file.
+            $requiredSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$script:ApprovalRequiredCases, [StringComparer]::Ordinal)
+            foreach ($case in $cases) {
+                $caseId = [string](Get-JsonValue $case 'id')
+                if ($requiredSet.Contains($caseId)) { continue }
+                try {
+                    $extraShot = Resolve-ApprovalEvidenceFile -Root $ownerOutput -RelativePath ([string](Get-JsonValue $case 'screenshot')) -AllowedExtensions @('.png')
+                } catch { $extraShot = $null }
+                if ($extraShot -and $usedEvidencePaths.Add($extraShot)) { [void]$reviewedScreenshots.Add($extraShot) }
+            }
+        } catch {
+            # A structurally hostile manifest must degrade to a contract error
+            # (exit 2 + status file), never an unhandled abort without evidence.
+            [void]$contractErrors.Add("manifest structure unreadable: $($_.Exception.GetType().Name)")
+        }
+    }
+
+    if ($reviewedScreenshots.Count -gt 0) {
+        Set-Content -LiteralPath (Join-Path $ownerOutput 'REQUIRES-MANUAL-VISUAL-PII-REVIEW.txt') `
+            -Value ("Every referenced PNG requires manual visual PII review before publication.`n" + (($reviewedScreenshots | ForEach-Object { [System.IO.Path]::GetRelativePath($ownerOutput, $_) }) -join "`n")) -Encoding utf8NoBOM
+    }
+    $contractComplete = ($contractErrors.Count -eq 0)
+    $status = [ordered]@{
+        status = 'EXECUTED_UNPROVEN'
+        commandExit = $cmdExit
+        commandExceptionType = $commandExceptionType
+        redactionExit = $redactionExit
+        contractComplete = $contractComplete
+        requiredCaseIds = $script:ApprovalRequiredCases
+        errors = @($contractErrors)
+        manualScreenshotReviewRequired = $true
+        note = 'This mode never reports pass until owner/runtime/manual-review acceptance closes OCR-8.'
+    }
+    Set-Content -LiteralPath (Join-Path $Artifacts 'approval-browser-status.json') `
+        -Value ($status | ConvertTo-Json -Depth 6) -Encoding utf8NoBOM
+    Write-Warning ("ApprovalBrowser executed but remains UNPROVEN (contractComplete={0}) - not a pass." -f $contractComplete)
     return 2
 }
 

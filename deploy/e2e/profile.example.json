@@ -35,5 +35,22 @@
   },
   "fixtureAttested": false,
   "approvalBrowserFixtureAttested": false,
-  "approvalBrowserCommand": null
+  "approvalBrowserOwnerRoot": "<path-to-owner-approved-approval-harness-root>",
+  "approvalBrowserCommand": null,
+  "approvalBrowserContract": {
+    "$note": "After the executable path, argv[1] must be the run-id placeholder and argv[2] the artifact-root placeholder (PowerShell array splatting is positional). The owner command writes approval-evidence.json plus referenced files under that root. T13 still reports EXECUTED_UNPROVEN until owner/runtime/manual review gates close.",
+    "runIdPlaceholder": "{T13_RUN_ID}",
+    "artifactRootPlaceholder": "{T13_ARTIFACT_ROOT}",
+    "manifestFile": "approval-evidence.json",
+    "requiredCaseIds": [
+      "admin-login-refresh",
+      "pending-list-refresh",
+      "approve-refresh",
+      "reject-refresh",
+      "student-approved-detail-refresh",
+      "student-rejected-detail-refresh"
+    ],
+    "manualScreenshotReviewRequired": true,
+    "cleanupRequired": true
+  }
 }

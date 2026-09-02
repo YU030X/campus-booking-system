@@ -65,12 +65,21 @@ out of scope here (contract: tasks 2.2 wording).
 ## Known coverage gaps (honest, with owner requests)
 
 1. **Approval browser flow (deterministic)** — no automated browser case for
-   admin approve/reject UI today; T08 cases cover student flows only.
-   → OCR-8 (new): owner-approved deterministic fixture + approved command.
+   admin approve/reject UI has been accepted by T13. T08 cases cover student
+   flows only; `scripts/tests/t11` is a real raw-CDP candidate but remains an
+   unattested owner asset. T13's 32-assertion offline intake contract requires a
+   repository-local, reparse-free owner root and a repository-local .exe/.ps1
+   executable, positional RunId/output root, fresh manifest, six exact refresh
+   cases, cleanup, safe/distinct evidence paths, fail-closed redaction and
+   permanent `EXECUTED_UNPROVEN`, but never substitutes for execution.
+   → OCR-8: owner-approved deterministic fixture + approved command/output contract.
 2. **Browser route-refresh after EVERY state transition** — T08 covers refresh
-   after conflict/cancel; a full per-state (approve→refresh, check-in→refresh,
-   no-show→refresh) refresh matrix is not automated. API-level equivalents are
-   covered (see approval/check-in rows). → deferred to OCR-8 scope.
+   after conflict/cancel. T11 currently updates approve/reject DOM state without
+   a route refresh plus explicit API reload/persisted-state assertion; user-status
+   refresh is only a later navigation, and cleanup/redaction remain incomplete.
+   The T13 intake manifest therefore requires six exact refresh case IDs, each
+   with `refreshObserved`, `apiReloadObserved`, screenshot and network evidence.
+   API-level equivalents are covered (see approval/check-in rows). → OCR-8 scope.
 3. **E2E evidence for admin reads (pending page via real admin login)** —
    covered at MVC/IT level (DefaultBookingAdminReadsTest, ApprovalApiRealIntegrationTest);
    no browser case. Same OCR-8 scope.
