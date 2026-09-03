@@ -44,7 +44,7 @@ T12 is a P1 wave-4 change on top of the frozen foundation, identity, resource, a
 
 ## Integration Gates
 
-- Gate A: auditable T06 `add-resource-availability`, T07 `add-concurrent-booking-core`, T09 `add-booking-approval-cancellation`, and T10 `add-checkin-no-show-violation` artifacts/owner handoffs exist as sibling planning files, but must be committed, reviewed, and available at a descendant of `0e53b7e`; uncommitted planning or an unreviewed worktree does not satisfy the gate.
+- Gate A: auditable T06 `add-resource-availability`, T07 `add-concurrent-booking-core`, T09 `add-booking-approval-cancellation`, and T10 `add-checkin-no-show-violation` artifacts/owner handoffs exist as sibling planning files, but must be committed, reviewed, and available at a descendant of `2ffae9d` (the verified equivalent shared base; the originally pinned `0e53b7e` is unreachable); uncommitted planning or an unreviewed worktree does not satisfy the gate.
 - Gate B: `add-redis-concurrency-foundation` has sibling planning artifacts and must provide a committed, reviewed Redis client/config port without requiring T12 to edit pom/config; its planning-only branch state does not satisfy the gate.
 - Gate C: shared-config and frontend single-writer owners must accept independent flags and route/API handoffs. Missing acceptance stops implementation.
 - Gate D: T12 must pass security 401/403 tests, real Redis/cache behavior, MySQL 8 integration and `EXPLAIN`, `mvn verify` (when backend implementation exists), frontend build (when UI is added), strict OpenSpec validation, and `git diff --check`; no unrun result is reported as passed.

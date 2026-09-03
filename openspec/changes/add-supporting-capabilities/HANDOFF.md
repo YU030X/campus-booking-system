@@ -5,10 +5,10 @@
 Implementation and executable acceptance are complete for operation logging,
 availability caching, in-app notifications, administrator statistics, their
 owner mutation/event hooks, shared feature flags, and the P1 frontend pages.
-The only unresolved planning precondition is task 0.1: the originally pinned
-base `0e53b7e` is unreachable, while `2ffae9d` is the verified equivalent
-shared base. That wording must not be revised or checked without explicit user
-confirmation.
+The final planning precondition, task 0.1, was resolved on 2026-09-02 with
+explicit user confirmation: the unreachable base pin `0e53b7e` was replaced by
+the verified equivalent shared base `2ffae9d` in proposal/design/tasks, and the
+task is checked. The change is 28/28.
 
 ## Accepted owner handoffs
 
