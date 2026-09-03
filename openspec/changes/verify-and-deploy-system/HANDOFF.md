@@ -401,16 +401,29 @@ OpenSpec apply progress: **24/34 tasks complete**
    semantics), all MAJOR/MINOR findings were fixed, 32/32 assertions plus the
    combined static gate, both strict validations and `git diff --check` pass,
    and the batch is committed. Do not execute T11.
-2. Obtain explicit owner attestation for the ephemeral Demo fixture before any
-   populated Setup/All execution. If granted, preserve the exact ignored map,
-   journal/evidence and manual screenshot review; otherwise tasks 6.1-6.4 stay Draft.
-3. Route the API application-dependency findings to the owning change and rerun
-   the exact API/edge real scan after an approved dependency refresh. Keep the
-   current bundle as the truthful FAIL evidence; do not substitute SBOM or
-   synthetic contracts and do not weaken the T13 gate.
+2. DONE (2026-09-04, user decisions 2+4): the ephemeral Demo fixture ran the
+   full Setup/StudentFlow/Teardown lifecycle exit 0 (T08 15/15, teardown
+   T13TD:0:1:1, 52/52 PNGs manually reviewed) — tasks 6.1-6.4 checked. The T11
+   approval contract runner was merged, attested, and executed through the
+   ApprovalBrowser lane (contractComplete=true, EXECUTED_UNPROVEN by design,
+   6/6 PNGs reviewed) — task 2.4 checked and OCR-8 closed. StudentFlow needed a
+   runtime-only loopback Redis forward (nginx stream sidecar) because the
+   compose backend network is intentionally internal; the T08 harness gained
+   optional Redis AUTH (`1b45208`). Known cosmetic: seeded purpose strings
+   mojibake in the approval UI (owner-runner SQL-literal encoding).
+3. REAL SCAN EXECUTED (2026-09-04, user decision 3): portable Trivy 0.74.0 +
+   fresh advisory/Java DBs (ghcr) scanned both images offline; validator
+   returned VALIDATED_SCAN_BLOCKS_RELEASE (aggregate 2 CRITICAL + 38 HIGH,
+   base-image aging) with evidence `deploy/artifacts/t13-real-scan-20260903/`;
+   the validator's UTC timestamp parsing defect was fixed (`Parse-Date`
+   RoundtripKind). The truthful FAIL bundle stands; release blocker is now a
+   base-image rebuild (an in-flight working-tree remediation bumping
+   eclipse-temurin 17.0.20 and nginx 1.30 with digest pinning was observed and
+   left uncommitted for its author).
 4. Obtain JMeter plus owner-provided historical/fixture artifacts before any
    concurrency execution. Never fabricate weakened migrations or mock results.
-5. Obtain the ApprovalBrowser owner contract before executing that lane.
+5. DONE (2026-09-04, user decision 4): see item 2 — the T11 owner contract
+   runner was merged, attested, and the lane executed end-to-end.
 6. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
    evidence; rerun both strict OpenSpec validations and `git diff --check`.
 7. Sync/archive only after every required local gate is complete. External
