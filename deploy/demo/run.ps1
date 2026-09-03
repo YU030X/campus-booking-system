@@ -180,7 +180,7 @@ if (-not $waitProperty -or $null -eq $waitProperty.Value -or
     exit 2
 }
 $script:noShowWait = [int]$noShowWaitValue
-$beUrl = Assert-LocalUrl -Url ([string]$profile0.backendUrl)  -Label 'backendUrl'
+$beUrl = ([uri](Assert-LocalUrl -Url ([string]$profile0.backendUrl)  -Label "backendUrl")).ToString().TrimEnd("/")
 $feUrl = Assert-LocalUrl -Url ([string]$profile0.frontendUrl) -Label 'frontendUrl'
 $composeFile = [string]$profile0.composeFile
 $seedPath    = [string]$profile0.t08SeedPath
@@ -436,7 +436,7 @@ function Invoke-DemoSetup {
         Write-Warning ("SETUP FAIL: time rule -> HTTP {0} code {1} msg {2}" -f $tr.Status, $tr.Code, $tr.Message)
         return 1
     }
-    $ruleIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM resource_time_rule WHERE resource_id=$resId" |
+    $ruleIds = @((Invoke-RootSql -File $composeFile -Query "SELECT id FROM resource_time_rule WHERE resource_id=$resId") -split '\r?\n' |
         Where-Object { $_ -match '^\d+$' })
     if ($ruleIds.Count -eq 0 -or @($ruleIds | Select-Object -Unique).Count -ne $ruleIds.Count) { throw 'time-rule ids are missing or duplicated' }
     $script:recoveryJournal.timeRuleIds = $ruleIds
@@ -462,7 +462,7 @@ function Invoke-DemoSetup {
     $script:recoveryJournal.bookings = @($script:recoveryJournal.bookings) + @([ordered]@{
         id = $pendingBookingId; purpose = "${purposePrefix}pending"; userId = $ids['student']; resourceId = $resId
     })
-    $pendingSlotIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM booking_slot WHERE booking_id=$pendingBookingId ORDER BY id" |
+    $pendingSlotIds = @((Invoke-RootSql -File $composeFile -Query "SELECT id FROM booking_slot WHERE booking_id=$pendingBookingId ORDER BY id") -split '\r?\n' |
         Where-Object { $_ -match '^\d+$' })
     if ($pendingSlotIds.Count -ne 2 -or @($pendingSlotIds | Select-Object -Unique).Count -ne 2) {
         throw 'pending booking did not create exactly two distinct slot ids'
@@ -491,10 +491,19 @@ function Invoke-DemoSetup {
     # Two 30-minute slots for the 60-minute window (matches owner splitter shape).
     $null = Invoke-RootSql -File $composeFile -Query "INSERT INTO ``booking_slot`` (resource_id, slot_time, booking_id) SELECT resource_id, start_time, id FROM ``booking`` WHERE id=$pastBookingId"
     $null = Invoke-RootSql -File $composeFile -Query "INSERT INTO ``booking_slot`` (resource_id, slot_time, booking_id) SELECT resource_id, DATE_ADD(start_time, INTERVAL 30 MINUTE), id FROM ``booking`` WHERE id=$pastBookingId"
-    $allSlotIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM booking_slot WHERE booking_id IN ($pendingBookingId, $pastBookingId) ORDER BY id" |
+    # The OWNER no-show scan is a periodic task: once it processes the past
+    # booking it legitimately RELEASES (deletes) those two slots. Setup must
+    # therefore assert only the deterministic pending slots exactly, and accept
+    # 0..2 surviving past slots without racing the scan.
+    $pendingSlotIds = @((Invoke-RootSql -File $composeFile -Query "SELECT id FROM booking_slot WHERE booking_id=$pendingBookingId ORDER BY id") -split '\r?\n' |
         Where-Object { $_ -match '^\d+$' })
-    if ($allSlotIds.Count -ne 4 -or @($allSlotIds | Select-Object -Unique).Count -ne 4) {
-        throw 'demo bookings did not create exactly four distinct slot ids'
+    if ($pendingSlotIds.Count -ne 2 -or @($pendingSlotIds | Select-Object -Unique).Count -ne 2) {
+        throw 'pending booking did not create exactly two distinct slot ids'
+    }
+    $allSlotIds = @((Invoke-RootSql -File $composeFile -Query "SELECT id FROM booking_slot WHERE booking_id IN ($pendingBookingId, $pastBookingId) ORDER BY id") -split '\r?\n' |
+        Where-Object { $_ -match '^\d+$' })
+    if ($allSlotIds.Count -lt 2 -or $allSlotIds.Count -gt 4 -or @($allSlotIds | Select-Object -Unique).Count -ne $allSlotIds.Count) {
+        throw 'demo bookings produced an impossible slot-id count'
     }
     $script:recoveryJournal.bookingSlotIds = $allSlotIds
     $script:recoveryJournal.updatedAt = (Get-Date).ToString('o')
@@ -513,16 +522,16 @@ function Invoke-DemoSetup {
     $noShowState = if ($violAfter -ne '0') { 'owner-scan-produced' } elseif ($violBefore -ne '0') { 'pre-existing' } else { 'pending-owner-scan' }
 
     $bookingIdIn = "($pendingBookingId, $pastBookingId)"
-    $violationRecordIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM violation_record WHERE booking_id IN $bookingIdIn ORDER BY id" |
+    $violationRecordIds = @((Invoke-RootSql -File $composeFile -Query "SELECT id FROM violation_record WHERE booking_id IN $bookingIdIn ORDER BY id") -split '\r?\n' |
         Where-Object { $_ -match '^\d+$' })
-    $approvalRecordIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM approval_record WHERE booking_id IN $bookingIdIn ORDER BY id" |
+    $approvalRecordIds = @((Invoke-RootSql -File $composeFile -Query "SELECT id FROM approval_record WHERE booking_id IN $bookingIdIn ORDER BY id") -split '\r?\n' |
         Where-Object { $_ -match '^\d+$' })
     $userIdIn = "($($ids['admin']), $($ids['student']), $($ids['intruder']))"
-    $notificationIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM notification WHERE user_id IN $userIdIn ORDER BY id" |
+    $notificationIds = @((Invoke-RootSql -File $composeFile -Query "SELECT id FROM notification WHERE user_id IN $userIdIn ORDER BY id") -split '\r?\n' |
         Where-Object { $_ -match '^\d+$' })
-    $blacklistIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM blacklist WHERE user_id IN $userIdIn OR operator_id IN $userIdIn ORDER BY id" |
+    $blacklistIds = @((Invoke-RootSql -File $composeFile -Query "SELECT id FROM blacklist WHERE user_id IN $userIdIn OR operator_id IN $userIdIn ORDER BY id") -split '\r?\n' |
         Where-Object { $_ -match '^\d+$' })
-    $operationLogIds = @(Invoke-RootSql -File $composeFile -Query "SELECT id FROM operation_log WHERE user_id IN $userIdIn ORDER BY id" |
+    $operationLogIds = @((Invoke-RootSql -File $composeFile -Query "SELECT id FROM operation_log WHERE user_id IN $userIdIn ORDER BY id") -split '\r?\n' |
         Where-Object { $_ -match '^\d+$' })
     $script:recoveryJournal.violationRecordIds = $violationRecordIds
     $script:recoveryJournal.approvalRecordIds = $approvalRecordIds
@@ -614,7 +623,11 @@ function Invoke-DemoStudentFlow {
     Get-ChildItem -LiteralPath $ArtifactRoot -Directory -Filter 'e2e-StudentBrowser-*' -ErrorAction SilentlyContinue |
         ForEach-Object { $existingE2eDirs[$_.FullName] = $true }
     try {
-        & $e2eRun -Mode StudentBrowser -Execute -ProfilePath $tmpProfile
+        # Tee keeps the e2e stdout OUT of this function's return pipeline: a
+        # leaked "==== mode: ... ====" string would turn $rc into Object[] and
+        # corrupt the demo overall exit code.
+        & $e2eRun -Mode StudentBrowser -Execute -ProfilePath $tmpProfile 2>&1 |
+            Tee-Object -FilePath (Join-Path $Artifacts 'studentflow-e2e.log') | Out-Null
         $e2eExit = $LASTEXITCODE
     } finally {
         if (Test-Path -LiteralPath $tmpProfile) {
@@ -912,9 +925,9 @@ function Invoke-DemoPartialRecovery {
     }
     if ($slotScopeClauses.Count -gt 0) {
         [void]$transaction.Add("SELECT id FROM booking_slot WHERE $slotScopeWhere FOR UPDATE")
-        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM booking_slot WHERE $slotScopeWhere)=$($slotIds.Count)")
+        [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM booking_slot WHERE $slotScopeWhere)<=$($slotIds.Count)")
         if ($slotIds.Count -gt 0) {
-            [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM booking_slot WHERE id IN $slotIn AND booking_id IN $bookingIn AND resource_id=$resourceId)=$($slotIds.Count)")
+            [void]$ownershipConditions.Add("(SELECT COUNT(*) FROM booking_slot WHERE id IN $slotIn AND booking_id IN $bookingIn AND resource_id=$resourceId)<=$($slotIds.Count)")
         }
         [void]$cleanupConditions.Add("(SELECT COUNT(*) FROM booking_slot WHERE $slotScopeWhere)=0")
     }
@@ -1166,7 +1179,7 @@ function Invoke-DemoTeardown {
     )
     $ownershipConditions += "(SELECT COUNT(*) FROM violation_record WHERE user_id IN $userIdIn OR booking_id IN $bookingIn)=$($violationIds.Count)"
     $ownershipConditions += "(SELECT COUNT(*) FROM approval_record WHERE approver_id IN $userIdIn OR booking_id IN $bookingIn)=$($approvalIds.Count)"
-    $ownershipConditions += "(SELECT COUNT(*) FROM booking_slot WHERE resource_id=$resId OR booking_id IN $bookingIn)=$($slotIds.Count)"
+    $ownershipConditions += "(SELECT COUNT(*) FROM booking_slot WHERE resource_id=$resId OR booking_id IN $bookingIn)<=$($slotIds.Count)"
     $ownershipConditions += "(SELECT COUNT(*) FROM notification WHERE user_id IN $userIdIn)=$($notificationIds.Count)"
     $ownershipConditions += "(SELECT COUNT(*) FROM blacklist WHERE user_id IN $userIdIn OR operator_id IN $userIdIn)=$($blacklistIds.Count)"
     $ownershipConditions += "(SELECT COUNT(*) FROM operation_log WHERE user_id IN $userIdIn)=$($operationLogIds.Count)"
@@ -1177,7 +1190,7 @@ function Invoke-DemoTeardown {
         $ownershipConditions += "(SELECT COUNT(*) FROM approval_record WHERE id IN $approvalIn AND booking_id IN $bookingIn AND approver_id=$adminId)=$($approvalIds.Count)"
     }
     if ($slotIds.Count -gt 0) {
-        $ownershipConditions += "(SELECT COUNT(*) FROM booking_slot WHERE id IN $slotIn AND booking_id IN $bookingIn AND resource_id=$resId)=$($slotIds.Count)"
+        $ownershipConditions += "(SELECT COUNT(*) FROM booking_slot WHERE id IN $slotIn AND booking_id IN $bookingIn AND resource_id=$resId)<=$($slotIds.Count)"
     }
     if ($notificationIds.Count -gt 0) {
         $ownershipConditions += "(SELECT COUNT(*) FROM notification WHERE id IN $notificationIn AND user_id IN $userIdIn)=$($notificationIds.Count)"
