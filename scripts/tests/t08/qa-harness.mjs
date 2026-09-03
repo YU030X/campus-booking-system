@@ -40,10 +40,16 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function redisCommand(...args) {
   const host = process.env.T08_QA_REDIS_HOST || '127.0.0.1';
   const port = Number(process.env.T08_QA_REDIS_PORT || 6379);
+  const password = process.env.T08_QA_REDIS_PASSWORD || '';
   const request = `*${args.length}\r\n${args.map((arg) => {
     const value = String(arg);
     return `$${Buffer.byteLength(value)}\r\n${value}\r\n`;
   }).join('')}`;
+  // Optional AUTH keeps passwordless environments unchanged; a password-protected
+  // Redis (compose profile) authenticates before the pipeline is written.
+  const payload = password
+    ? `*2\r\n$4\r\nAUTH\r\n$${Buffer.byteLength(password)}\r\n${password}\r\n`
+    : '';
   return new Promise((resolve, reject) => {
     const socket = createConnection({ host, port });
     let response = '';
@@ -52,14 +58,14 @@ function redisCommand(...args) {
       reject(new Error(`Redis command timeout ${host}:${port}`));
     }, 5000);
     socket.setEncoding('utf8');
-    socket.once('connect', () => socket.write(request));
+    socket.once('connect', () => socket.write(payload + request));
     socket.on('data', (chunk) => {
       response += chunk;
       if (!response.endsWith('\r\n')) return;
       clearTimeout(timer);
       socket.end();
       if (response.startsWith('-')) reject(new Error(`Redis error: ${response.trim()}`));
-      else resolve(response.trim());
+      else resolve(response.trim().split('\r\n').pop());
     });
     socket.once('error', (error) => {
       clearTimeout(timer);
