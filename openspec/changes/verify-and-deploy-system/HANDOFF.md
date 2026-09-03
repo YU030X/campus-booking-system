@@ -1,6 +1,6 @@
 # T13 Verify and Deploy System — Handoff
 
-Date: 2026-09-02
+Date: 2026-09-03
 Branch: `codex/verify-and-deploy-system`  
 Implementation baseline: `5bcc920 fix: bind Demo teardown to exact ownership`
 Committed branch HEAD before the current Approval batch: `f8dcbea docs: refresh T13 Demo ownership handoff`
@@ -20,10 +20,11 @@ OpenSpec apply progress: **24/34 tasks complete**
   `deploy/artifacts/verify-frontend-t13-frontend-pass/`.
 - Compose config validation passes with safe non-interpolated evidence:
   `deploy/artifacts/verify-compose-config-local-compose-config/`.
-- API/edge were rebuilt from the current checkout using cached fixed bases;
-  `deploy/artifacts/t13-image-build-20260901-current/` records base RepoDigests,
-  non-root users and exit 0. All four Compose services are healthy; only edge is
-  published, on loopback `127.0.0.1:18080`.
+- API/edge were rebuilt from the current checkout using the refreshed runtime
+  tags whose verified RepoDigests are now pinned in the defaults;
+  `deploy/artifacts/t13-image-build-20260903-runtime-refresh/` records the new
+  base RepoDigests, non-root users and exit 0. All four Compose services are
+  healthy; only edge is published, on loopback `127.0.0.1:18080`.
 - Local Docker SBOM generation completed with exit 0 for both application images:
   `deploy/artifacts/t13-local-sbom-20260901/api.syft.json` and
   `deploy/artifacts/t13-local-sbom-20260901/edge.syft.json`. These are ignored
@@ -96,6 +97,101 @@ OpenSpec apply progress: **24/34 tasks complete**
   contracts and passes on the committed scan batch. Strict change validation,
   main-spec validation 21/21, the focused scan contract, sensitive-format scan,
   and `git diff --check` also pass.
+
+## 2026-09-03 runtime pin refresh and real scan
+
+- With Docker Desktop Linux/container proxy enabled, only the two authorized
+  linux/amd64 runtime tags were pulled. Pull evidence and local metadata are in
+  `deploy/artifacts/t13-image-pulls-20260903/`:
+  `eclipse-temurin:17.0.20_8-jre-jammy` →
+  `eclipse-temurin@sha256:e17d77fb030dd4b642dc078d048a5fb9efcb3676ee20305d905949105a6ccd5a`
+  (Image ID `sha256:e17d77fb030dd4b642dc078d048a5fb9efcb3676ee20305d905949105a6ccd5a`),
+  and `nginxinc/nginx-unprivileged:1.30-alpine3.24` →
+  `nginxinc/nginx-unprivileged@sha256:9b87ad3dd9f431c733f19dfb278c7eb3dba9dca381942c79818bb42f1a566a83`
+  (Image ID `sha256:9b87ad3dd9f431c733f19dfb278c7eb3dba9dca381942c79818bb42f1a566a83`).
+  The first Temurin attempt timed out after layer download (exit 124); the
+  same-tag retry completed with exit 0. No other image was pulled.
+- The worktree remains on branch `codex/verify-and-deploy-system` at committed
+  HEAD `c434df7`; the runtime pin and evidence/documentation refresh edits are
+  intentionally uncommitted.
+- Trivy 0.74.0 offline HIGH/CRITICAL pre-scans of both runtime bases returned
+  zero findings. The runtime defaults in `.env.example`, both Dockerfiles, and
+  Compose build args use those exact tag@RepoDigest references; application
+  dependencies and business code were not changed.
+- The refreshed-tag build `docker compose ... build --pull=false api edge`
+  exited 0. The resulting API image is
+  `sha256:ac8a54bfd02077c1e34c69522434d09fd0e7ba28931542aa49ae734e2917af23`
+  and edge is
+  `sha256:c43c27636b7fda42663d89a82d6690f307aeb99762dbbb48f7e4f12ba3dba606`.
+  Compose recreation and health smoke passed: four services healthy, `/healthz`
+  200, unauthenticated `/api/v1/resources` 401; evidence is under
+  `deploy/artifacts/t13-runtime-refresh-20260903/`.
+- After the defaults were converted to the immutable tag@RepoDigest references,
+  a no-pull rebuild recheck was attempted and exited 1 because the Docker
+  Desktop Linux engine pipe was unavailable. No additional image was pulled or
+  rebuilt, and no post-pin image-ID equality/difference claim is made; the
+  existing refresh IDs above remain the prior tag-based evidence.
+- The new real scan bundle is
+  `deploy/artifacts/t13-real-scan-20260903-runtime-refresh/`. Manifest/report/
+  image IDs/digests/hashes validate structurally, but API reports 7 CRITICAL +
+  30 HIGH Java application-dependency findings (edge 0/0). `deploy/scan/run.ps1
+  -Action Validate` returned `VALIDATED_SCAN_BLOCKS_RELEASE`, exit 2. Therefore
+  task 7.4 remains unchecked: the base-image blocker is resolved, while the
+  application-dependency findings and other composite gates remain.
+
+## 2026-09-03 current continuation result (uncommitted)
+
+- This continuation completed only the runtime-pin/documentation subtask. The
+  JRE and Nginx runtime defaults now use the verified linux/amd64
+  `tag@sha256` references in `.env.example`, both Dockerfiles, Compose build
+  args, and the TLS-overlay static fixture. Both Dockerfile comments now point
+  to recorded build/digest evidence. The verification matrix covers
+  `deploy/artifacts/t13-runtime-refresh-20260903/` alongside the prior 413/504
+  evidence. `deploy/scan/README.md` and `deploy/README.md` now state the real
+  scan result (API FAIL 7 CRITICAL + 30 HIGH Java application dependencies;
+  edge PASS 0/0) and the residual per-finding Java advisory-DB provenance
+  limitation without changing the validator schema.
+- OCR-4 now records the runtime-base portion as partially resolved and the
+  application-dependency release blocker. OCR-12 is the new T01/shared-
+  dependency owner request, citing the 37 rows in
+  `deploy/artifacts/t13-real-scan-20260903-runtime-refresh/api-high-critical.tsv`
+  and requiring compatibility rationale, `mvn dependency:tree`, `mvn verify`,
+  immutable-runtime rebuild, fresh Trivy reports, and `Validate` evidence.
+- Actual checks in this continuation:
+  `docker compose --env-file deploy/.env.example -f deploy/compose.yml config
+  --quiet` exit 0; `pwsh deploy/verify/run.ps1 -Mode Check` exit 0;
+  `pwsh deploy/scan/contract-tests.ps1` exit 0 (28 assertions);
+  `pwsh deploy/scan/run.ps1 -Action Validate -ManifestPath
+  deploy/artifacts/t13-real-scan-20260903-runtime-refresh/manifest.json` exit 2
+  with `VALIDATED_SCAN_BLOCKS_RELEASE` (expected finding block);
+  `pwsh deploy/scan/run.ps1 -Action Environment` exit 3 with
+  `BLOCKED_NO_OFFLINE_SCANNER_DB`; TLS overlay static check exit 0;
+  `openspec validate verify-and-deploy-system --type change --strict
+  --no-interactive` exit 0; `openspec validate --specs --strict
+  --no-interactive` exit 0 (21/21); and `git diff --check` exit 0.
+- A digest-pinned no-pull `docker compose ... build --pull=false api edge`
+  recheck was attempted with the two immutable runtime variables and exited 1
+  because the Docker Desktop Linux engine pipe was unavailable. No image was
+  pulled or rebuilt, so no post-pin image-ID equality/difference claim or new
+  matching build artifact is made. The prior refresh IDs remain prior tag-based
+  evidence; the existing verified RepoDigests are unchanged.
+- Apply progress remains **24/34 tasks complete**. Task 7.4 remains `[ ]`;
+  this continuation did not change any OpenSpec task checkbox. No
+  `booking-api/pom.xml`, business/frontend/common source, migration, commit,
+  push, archive, or spec-sync action was performed.
+- Uncommitted tracked files at handoff: `deploy/.env.example`,
+  `deploy/README.md`, `deploy/api/Dockerfile`, `deploy/compose.yml`,
+  `deploy/evidence/verification-matrix.md`, `deploy/owner-change-requests.md`,
+  `deploy/scan/README.md`, `deploy/scripts/tls-overlay-check.ps1`,
+  `deploy/web/Dockerfile`, `openspec/changes/verify-and-deploy-system/HANDOFF.md`,
+  and `openspec/changes/verify-and-deploy-system/tasks.md`. Generated scan/TLS
+  artifacts remain ignored.
+- Remaining blockers are unchanged: OCR-12 Java dependency remediation and a
+  rerun of the real API/edge scan; JMeter 5.6.3 plus valid fixture/history
+  artifacts (OCR-5/6/7); owner-attested ApprovalBrowser fixture/runner (OCR-8);
+  Demo owner attestation/runtime evidence; and external host/DNS/TLS/credential
+  authorization (OCR-2). The change remains **DRAFT / partially accepted** and
+  must not be archived or promoted.
 
 ## Owner fixes integrated during acceptance
 
@@ -225,12 +321,14 @@ OpenSpec apply progress: **24/34 tasks complete**
    still needs generated credentials, finally teardown, complete T13 redaction,
    and the six-case post-state refresh/API-reload evidence contract. The
    32-assertion intake suite is offline structure only and does not complete 2.4.
-3. Vulnerability/dependency scanning is not run. A local audit found Docker
-   Scout v1.20.4 and its cached SBOM, but no local advisory/CVE database and no
-   documented offline-CVE mode. Trivy, Grype, Syft CLI and OSV-Scanner are not
-   installed; only package-manager manifests were found. Fixed local base
-   RepoDigests, application image IDs, and local Syft-format SBOM inventories are
-   recorded, but no scanner result or CVE claim exists. Task 7.4 stays unchecked.
+3. The refreshed runtime base images pass the Trivy 0.74.0 offline
+   HIGH/CRITICAL pre-scan, but the full API/edge scan is a release blocker:
+   API has 7 CRITICAL + 30 HIGH Java application-dependency findings; edge has
+   zero UNKNOWN/HIGH/CRITICAL findings. The manifest/report/image-ID/digest/hash
+   bundle validates structurally, while `deploy/scan/run.ps1 -Action Validate`
+   returns `VALIDATED_SCAN_BLOCKS_RELEASE` (exit 2). T13 does not edit Maven or
+   application dependencies; task 7.4 stays unchecked pending owner remediation
+   and the remaining composite gates.
 4. No host/domain, DNS ownership, TLS mechanism, credentials, or external
    deployment authorization exists (OCR-2). Tasks 8.1-8.3 remain blocked and no
    public URL/TLS claim is allowed.
@@ -287,14 +385,14 @@ OpenSpec apply progress: **24/34 tasks complete**
   the passing static gate, and independently reviewed. Review findings on
   reparse-point escape, malformed zero-finding reports, image-reference binding,
   optional digest wording, Scout plugin invocation, and execution-log credential
-  screening were fixed. It is committed but must not be cited as real scan
-  evidence.
+  screening were fixed. The portable Trivy 0.74.0 run on 2026-09-03 is recorded
+  separately under `deploy/artifacts/t13-real-scan-20260903-runtime-refresh/` and
+  must be cited with its FAIL result, not as release approval.
 - The JMeter report-schema/synthetic contract-test, optional TLS-overlay, and
   184-assertion Demo ownership/compensation/teardown contract batches are committed.
-  JMeter/Trivy/Grype/OSV-Scanner
-  CLIs remain absent; Docker's local SBOM command was available and produced the
-  inventories listed above, while Docker Scout lacks a locally verified advisory
-  database.
+  JMeter/Grype/OSV-Scanner CLIs remain absent; portable Trivy 0.74.0 and a fresh
+  advisory DB were used for the 2026-09-03 real scan. Docker's local SBOM command
+  remains package inventory only, not CVE evidence.
 
 ## Safe continuation order
 
@@ -306,10 +404,10 @@ OpenSpec apply progress: **24/34 tasks complete**
 2. Obtain explicit owner attestation for the ephemeral Demo fixture before any
    populated Setup/All execution. If granted, preserve the exact ignored map,
    journal/evidence and manual screenshot review; otherwise tasks 6.1-6.4 stay Draft.
-3. Obtain a supported local scanner plus fresh advisory database, or separately
-   authorize a controlled network-backed scanner/database workflow, before any
-   real vulnerability claim. Validate both API/edge evidence bundles with
-   `deploy/scan/run.ps1`; do not substitute SBOM or synthetic contracts.
+3. Route the API application-dependency findings to the owning change and rerun
+   the exact API/edge real scan after an approved dependency refresh. Keep the
+   current bundle as the truthful FAIL evidence; do not substitute SBOM or
+   synthetic contracts and do not weaken the T13 gate.
 4. Obtain JMeter plus owner-provided historical/fixture artifacts before any
    concurrency execution. Never fabricate weakened migrations or mock results.
 5. Obtain the ApprovalBrowser owner contract before executing that lane.

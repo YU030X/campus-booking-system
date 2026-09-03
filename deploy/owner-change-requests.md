@@ -41,11 +41,23 @@ validation passed 21/21. The change still remains Draft for unexecuted runtime,
 fixture/history, digest, and external gates; ordinary pre-PR branch-local state
 is not misclassified as a missing integration proof.
 
-## OCR-4 (build hygiene): image tag→digest pairs unresolved
+## OCR-4 (build hygiene): runtime base tag→digest refresh
 
-`deploy/.env.example` pins non-floating tags (maven/temurin/node/nginx-
-unprivileged/mysql/redis) but no SHA256 digest has been resolved/recorded yet.
-Blocks task 4.1 completion; refresh procedure documented in deploy/README.md.
+Status: PARTIALLY RESOLVED IN T13 — the runtime-base portion is complete; Java
+application dependencies remain a release blocker and are tracked by OCR-12.
+
+The 2026-09-03 refresh resolved and verified the linux/amd64 runtime references:
+
+* `eclipse-temurin:17.0.20_8-jre-jammy@sha256:e17d77fb030dd4b642dc078d048a5fb9efcb3676ee20305d905949105a6ccd5a`
+* `nginxinc/nginx-unprivileged:1.30-alpine3.24@sha256:9b87ad3dd9f431c733f19dfb278c7eb3dba9dca381942c79818bb42f1a566a83`
+
+The immutable defaults are present in `deploy/.env.example`, both Dockerfiles,
+and the Compose build args. Pull/build metadata and the resulting API/edge image
+IDs are recorded in `deploy/artifacts/t13-image-pulls-20260903/` and
+`deploy/artifacts/t13-image-build-20260903-runtime-refresh/`; both runtime-base
+HIGH/CRITICAL pre-scans returned 0/0. The full API scan still reports 7 CRITICAL
+and 30 HIGH Java application-dependency findings, so `Validate` returns
+`VALIDATED_SCAN_BLOCKS_RELEASE` (exit 2) and task 7.4 remains unchecked.
 
 ## OCR-5 (T01/demo seed): fixture/token source undefined
 
@@ -105,9 +117,14 @@ screenshot+network evidence, safe relative paths and fail-closed redaction
 executable must be a repository-local, reparse-free `.exe`, or a `.ps1` run in
 a separate `pwsh -NoProfile -File` child process. Even a structurally complete
 owner output remains `EXECUTED_UNPROVEN`/exit 2 until owner/runtime/manual PNG
-review closes OCR-8. Owner request: update and attest the T11 fixture/runner to
-this contract; T13 will not modify `scripts/tests/**`, mock outcomes, or execute
-the candidate before attestation.
+review closes OCR-8. RESOLVED (2026-09-04, user decision 4): the T11 owner branch delivered
+`approval-contract-runner.ps1/.mjs` (generated credentials, scoped cleanup-first
+fixture, six refresh cases with API-reload persistence, atomic arm/confirm, 582
+lines, committed `349e070`), was merged into T13 (`bff8464`), attested by the
+user, and executed through the hardened lane: contractComplete=true,
+EXECUTED_UNPROVEN by design, 6/6 PNGs manually reviewed, exact-scope cleanup
+verified. OCR-8 is closed; the lane's permanent non-pass status is a by-design
+guardrail, not a remaining gap.
 
 ## OCR-6 (owner/T08 history): vulnerable-baseline image/artifact unavailable
 
@@ -162,3 +179,40 @@ Status: RESOLVED IN OWNER BRANCH. The first real StudentBrowser run reached
 request completed, cascading into cases 09-11. T08 now waits up to 12 seconds
 for a new availability payload (`6e51a98`). The merged final run passed 15/15;
 this is a harness evidence fix, not a business/frontend source change.
+
+## OCR-12 (T01/shared dependency owner): Java application dependency findings
+
+Status: OPEN — blocks T13 task 7.4 and release approval. T13 must not edit
+`booking-api/pom.xml`, shared dependency management, or business code.
+
+Evidence: the real offline Trivy run `t13-real-scan-20260903-runtime-refresh`
+validated the rebuilt API image and retained exactly 37 HIGH/CRITICAL finding
+rows (30 HIGH, 7 CRITICAL) in
+`deploy/artifacts/t13-real-scan-20260903-runtime-refresh/api-high-critical.tsv`
+(header plus rows 2–38). Every row is a Java target with
+`Source=application-dependency`; the edge image is 0/0. Runtime-base
+HIGH/CRITICAL pre-scans are 0/0, so these findings are not a base-image issue.
+
+Owner request:
+
+1. Select compatible patch/minor versions for the Java 17/Spring Boot 3.5
+   contract (including the managed Jackson, Micrometer, Netty, Tomcat, Spring
+   Boot/Data/Security/Core/Web artifacts) and record the compatibility rationale;
+   do not take an unreviewed major-line jump merely to silence the report.
+2. Attach a complete `mvn dependency:tree` result that maps each finding to its
+   direct or transitive owner and explains any dependency-management override.
+3. Apply the dependency refresh in the owning T01/shared-dependency change,
+   then run `cd booking-api && mvn verify` and preserve the real exit code and
+   test summary.
+4. Rebuild API and edge from the refreshed checkout with the immutable runtime
+   references (`docker compose ... build --pull=false api edge`), recording
+   linux/amd64 image IDs and runtime RepoDigests.
+5. Run a fresh offline Trivy scan of both rebuilt images and execute
+   `deploy/scan/run.ps1 -Action Validate` against the new manifest. Provide the
+   raw reports, execution log, hashes, and normalized result; release requires
+   scanner exits 0 and UNKNOWN/HIGH/CRITICAL counts of zero for both images.
+
+The current scan manifest records global advisory-DB metadata/checksum, but its
+validator schema does not carry per-finding Java DB provenance. Preserve that
+limitation as residual risk and do not broaden the schema unless an existing
+specification explicitly requires it.
