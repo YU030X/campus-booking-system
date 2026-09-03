@@ -1,0 +1,6 @@
+# T13 verification artifacts contain raw logs/dumps/response bodies.
+# Keep only this ignore file under version control; everything else here is
+# runtime evidence and must never be committed (may contain redacted-but-real
+# hostnames, identifiers, or payloads).
+*
+!.gitignore

@@ -1,0 +1,21 @@
+# Optional TLS overlay for an explicitly authorized operator-managed target.
+# This file is inert unless it is supplied together with compose.yml. It mounts
+# operator-provided certificate material as Compose secrets and never contains a
+# certificate, private key, domain, credential, or renewal command itself.
+services:
+  edge:
+    ports:
+      - "${EDGE_TLS_BIND:-127.0.0.1}:${EDGE_TLS_PORT:-443}:8443"
+    volumes:
+      - ./nginx/tls.conf:/etc/nginx/conf.d/tls.conf:ro
+    secrets:
+      - source: tls_cert
+        target: tls.crt
+      - source: tls_key
+        target: tls.key
+
+secrets:
+  tls_cert:
+    file: ${TLS_CERT_PATH:?set TLS_CERT_PATH to an operator-provided certificate}
+  tls_key:
+    file: ${TLS_KEY_PATH:?set TLS_KEY_PATH to an operator-provided private key}

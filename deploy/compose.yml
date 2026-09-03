@@ -1,0 +1,162 @@
+# T13 local/container topology. Runtime acceptance status and evidence are
+# tracked in deploy/evidence/verification-matrix.md; this file is not evidence.
+#
+# Contract summary:
+# - Only the edge service publishes a host port. Default binding is loopback
+#   (127.0.0.1) so local evidence cannot go public; any non-loopback or 0.0.0.0
+#   publish is an authorized external-gate action (tasks 8.1-8.2).
+# - MySQL and Redis are on an internal-only network with NO host ports.
+# - Secrets are injected via environment placeholders with `${VAR:?}` required
+#   syntax, sourced from a local uncommitted deploy/.env created from
+#   .env.example. No secret value is stored in this file.
+name: campus-booking
+
+x-restart: &restart_policy
+  restart: unless-stopped
+
+x-logging: &logging_bounds
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  mysql:
+    image: ${MYSQL_IMAGE:-mysql:8.0.40}
+    <<: *restart_policy
+    logging: *logging_bounds
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in deploy/.env}
+      # App database + least-privilege datasource account are created by the
+      # official image's first-init from these variables (plus the ro V001-V005
+      # scripts). First init only - changing them later needs a volume reset.
+      MYSQL_DATABASE: booking_db
+      MYSQL_USER: ${DB_USERNAME:?set DB_USERNAME in deploy/.env}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in deploy/.env}
+    volumes:
+      # Read-only migration input on first init; migrations stay owner-frozen,
+      # T13 never edits sql/.
+      - ../sql:/docker-entrypoint-initdb.d:ro
+      - mysql-data:/var/lib/mysql
+    networks:
+      - backend
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 -uroot -p"$$MYSQL_ROOT_PASSWORD"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    mem_limit: 768m
+    mem_reservation: 256m
+    cpus: 1.0
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:7.4.9}
+    <<: *restart_policy
+    logging: *logging_bounds
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    mem_limit: 192m
+    mem_reservation: 64m
+    cpus: 0.5
+
+  api:
+    build:
+      context: ../booking-api
+      dockerfile: ../deploy/api/Dockerfile
+      args:
+        MAVEN_BUILD_IMAGE: ${MAVEN_BUILD_IMAGE:-maven:3.9.9-eclipse-temurin-17}
+        JRE_RUNTIME_IMAGE: ${JRE_RUNTIME_IMAGE:-eclipse-temurin:17.0.12_7-jre-jammy}
+    image: campus-booking/api:${API_IMAGE_TAG:-local}
+    <<: *restart_policy
+    logging: *logging_bounds
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/booking_db?serverTimezone=Asia/Shanghai&characterEncoding=UTF-8
+      DB_USERNAME: ${DB_USERNAME:?set DB_USERNAME in deploy/.env}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in deploy/.env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/.env}
+      REDIS_ENABLED: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # Four independent T12 capability switches remain default-false except the
+      # local cache profile. Operators can enable them independently in .env.
+      BOOKING_OPERATION_LOG_ENABLED: ${BOOKING_OPERATION_LOG_ENABLED:-false}
+      BOOKING_CACHE_ENABLED: ${BOOKING_CACHE_ENABLED:-true}
+      BOOKING_NOTIFICATIONS_ENABLED: ${BOOKING_NOTIFICATIONS_ENABLED:-false}
+      BOOKING_STATISTICS_ENABLED: ${BOOKING_STATISTICS_ENABLED:-false}
+      SPRINGDOC_ENABLED: ${SPRINGDOC_ENABLED:-false}
+    expose:
+      - "8080"
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      # Liveness-only TCP probe: this JRE image ships no curl/wget. Actuator HTTP
+      # probe equivalence is an open item tracked in deploy/README.md.
+      test:
+        - CMD-SHELL
+        - bash -c "</dev/tcp/127.0.0.1/8080"
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 60s
+    mem_limit: 512m
+    mem_reservation: 192m
+    cpus: 1.0
+
+  edge:
+    build:
+      context: ../booking-web
+      dockerfile: ../deploy/web/Dockerfile
+      args:
+        NODE_BUILD_IMAGE: ${NODE_BUILD_IMAGE:-node:22.14.0-alpine}
+        NGINX_RUNTIME_IMAGE: ${NGINX_RUNTIME_IMAGE:-nginxinc/nginx-unprivileged:1.27.4-alpine}
+    image: campus-booking/edge:${EDGE_IMAGE_TAG:-local}
+    <<: *restart_policy
+    logging: *logging_bounds
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      # Loopback-only by default. Container side is fixed at 8080 (non-root);
+      # host bind/host port are separate vars so no default contains a colon.
+      - "${EDGE_HTTP_BIND:-127.0.0.1}:${EDGE_HTTP_PORT:-80}:8080"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    mem_limit: 128m
+    mem_reservation: 32m
+    cpus: 0.25
+
+networks:
+  frontend: {}
+  backend:
+    internal: true
+
+volumes:
+  mysql-data: {}
+  redis-data: {}

@@ -1,46 +1,29 @@
-# Test harness entry points
+# scripts/tests — 可复用测试脚本目录
 
-Reusable acceptance/regression/environment harnesses live under
-`scripts/tests/<scope>/`, each with a single documented Windows-first entry:
-`run.ps1`. Generated screenshots, logs, credentials and run evidence are
-ignored by a local `.gitignore` inside each scope directory.
+本目录收录固化在仓库内的可复用验收、回归和环境脚本。执行前先复用已有入口；确无覆盖时才新增或修改脚本，禁止在会话、`target/` 或临时目录中重复编写等价 harness。每个 scope 提供一个文档化的 Windows-first `run.ps1`，日志、截图、凭据和运行证据由局部 `.gitignore` 排除。
 
-## Scopes
+## 目录
 
-### `t11/` — administrator operations frontend (`add-web-admin-operations`)
+| Scope | 用途 | 入口 |
+| --- | --- | --- |
+| `t08/` | 学生预约 headless 真实链路 QA | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\tests\t08\run.ps1 -Action Check\|List\|Smoke\|Run` |
+| `t11/` | 管理端用户与审批纯测试 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\tests\t11\run.ps1 -Mode Check\|List\|Unit\|All` |
+| `t12/` | 日志、缓存、通知、统计与 P1 页面 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\tests\t12\run.ps1 -Mode Check\|List\|OperationLog\|Cache\|RealCache\|Notifications\|Statistics\|Frontend\|Flags\|CutMatrix\|Unit` |
 
-Entry: `powershell -ExecutionPolicy Bypass -File scripts/tests/t11/run.ps1 -Mode All`.
-Modes: `Check` boundary/diff checks, `List` case inventory, `Unit` Node tests,
-and `All` (default). Browser run evidence lands in the scope-local ignored
-`artifacts/` directory.
+## T12 modes
 
-### `t12/` — operation-log + availability-cache + notifications + statistics (`add-supporting-capabilities` §1–§4)
+T12 的 Maven 模式使用 `booking-api/` 下的窄 Surefire 选择器；不等同于完整 `verify`。Notifications/Statistics 及 RealCache/CutMatrix 包含需要真实 MySQL 或 Redis 的集成类。
 
-Entry: `pwsh scripts/tests/t12/run.ps1 [Check|List|OperationLog|Cache|RealCache|Notifications|Statistics|Frontend|Flags|CutMatrix|Unit]`
-(default `Check`). Maven modes are narrow Surefire selections from
-`booking-api/`; no `verify`, no aggregation into the full build.
+- `Check`：验证四个主/测试树、运行 `git diff --check`，并拒绝未交接的共享路径漂移。
+- `List`：列出后端切片与前端契约测试，不执行。
+- `OperationLog`：`com.yu030x.booking.log.**`。
+- `Cache`：`com.yu030x.booking.cache.**`，排除真实 Redis 标签。
+- `RealCache`：真实 MySQL 8 + Redis 7 缓存及 owner 变更集成选择。
+- `Notifications`：`com.yu030x.booking.notification.**`。
+- `Statistics`：`com.yu030x.booking.statistics.**`，包含 MySQL EXPLAIN 证据。
+- `Frontend`：通知/统计 Node 契约测试及 `npm run build`。
+- `Flags`：四个独立 opt-in/default-false 契约。
+- `CutMatrix`：依次切断统计、通知、缓存，每阶段重跑完整 `booking/**` T07 选择。
+- `Unit`：四个后端切片的联合选择，排除真实 Redis 标签。
 
-- `Check` (default): static only — verifies all four main/test trees
-  (`com/yu030x/booking/{log,cache,notification,statistics}`) exist and hold
-  sources, runs `git diff --check`, and aborts on local drift inside strongly
-  forbidden shared paths (pom.xml, `src/main/resources`, `sql/`, `deploy/`,
-  `docs/`, `booking-web/`). Other local drift lines are printed as informational.
-- `List`: prints the complete test inventory of the four slices without
-  executing anything.
-- `OperationLog`: `mvn test -Dtest=com.yu030x.booking.log.**`
-- `Cache`: `mvn test -Dtest=com.yu030x.booking.cache.**`
-- `RealCache`: real MySQL 8 + Redis 7 cache/owner integration selection.
-- `Notifications`: `mvn test -Dtest=com.yu030x.booking.notification.**`
-  (includes MySQL-backed integration classes; requires database access when run).
-- `Statistics`: `mvn test -Dtest=com.yu030x.booking.statistics.**`
-  (includes MySQL-backed integration/EXPLAIN-oriented classes; requires database access when run).
-- `Frontend`: notification/statistics Node contract tests followed by the
-  production `npm run build`.
-- `Flags`: validates all four independent opt-in/default-false contracts.
-- `CutMatrix`: cuts statistics, notifications, then cache and reruns the full
-  `booking/**` T07 selection at every stage.
-- `Unit`: union selection of all four slice patterns in one surefire run:
-  `-Dtest=com.yu030x.booking.log.**,com.yu030x.booking.cache.**,com.yu030x.booking.notification.**,com.yu030x.booking.statistics.**`.
-
-Artifacts: `t12/.gitignore` keeps run evidence (logs, output files) untracked;
-it also stays in place for future real executions.
+各子目录 README 记录前置条件、退出码和证据位置；尚未实际执行的模式不得声明通过。
