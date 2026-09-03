@@ -96,8 +96,11 @@ function Get-RequiredLong {
 function Parse-Date {
     param([string]$Text, [string]$Name)
     [datetimeoffset]$value = [datetimeoffset]::MinValue
-    if (-not [datetimeoffset]::TryParse($Text, [ref]$value)) {
-        Write-Outcome 2 'INVALID_EVIDENCE' "field '$Name' must be an ISO-8601 timestamp"
+    # RoundtripKind + invariant culture: a trailing "Z" MUST parse as UTC. The
+    # default styles treat it as LOCAL time, which on a UTC+8 operator machine
+    # silently shifts correct timestamps 8 hours into the past/future.
+    if (-not [datetimeoffset]::TryParse($Text, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$value)) {
+        Write-Outcome 2 'INVALID_EVIDENCE' "$Name must be an ISO-8601 timestamp"
     }
     return $value.ToUniversalTime()
 }
