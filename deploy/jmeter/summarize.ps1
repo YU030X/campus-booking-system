@@ -238,7 +238,13 @@ foreach ($s in $samples) {
     $body = ''
     $bodyNode = $s.SelectSingleNode('responseData')
     if ($bodyNode) { $body = [string]$bodyNode.InnerText }
-    $transportFailed = ([string]$s.s -eq 'false')
+    # JMeter s=false marks ANY failed sample (non-2xx included); transport
+    # failure is signalled by the response code/message, not by s.
+    $rmAttr = $s.Attributes['rm']
+    $rmValue = if ($rmAttr) { $rmAttr.Value } else { '' }
+    # JMeter s=false marks ANY failed sample (non-2xx included); transport
+    # failure is signalled by the response code/message, not by s.
+    $transportFailed = ($rmValue -match 'Non HTTP response')
     $class = Classify-Sample -ResponseCode ([string]$s.rc) -TransportFailed $transportFailed -Body $body
     $classes[$class]++
     [double]$ms = 0

@@ -128,9 +128,9 @@ function Get-ScopeCounts {
     # WhereClause is built ONLY from regex-validated numeric ids and formatted
     # timestamps (see fixture gates below) - placeholders can never reach SQL.
     param([string]$File, [string]$WhereClause, [string]$DayFrom, [string]$DayTo)
-    $bookingTotal = Get-CountViaContainer -File $File -Query 'SELECT COUNT(*) FROM `booking`'
-    $slotTotal    = Get-CountViaContainer -File $File -Query 'SELECT COUNT(*) FROM `booking_slot`'
-    $window       = Get-CountViaContainer -File $File -Query "SELECT COUNT(*) FROM `booking` WHERE $WhereClause AND start_time >= '$DayFrom 00:00:00' AND end_time <= '$DayTo 23:59:59'"
+    $bookingTotal = Get-CountViaContainer -File $File -Query 'SELECT COUNT(*) FROM booking'
+    $slotTotal    = Get-CountViaContainer -File $File -Query 'SELECT COUNT(*) FROM booking_slot'
+    $window       = Get-CountViaContainer -File $File -Query "SELECT COUNT(*) FROM booking WHERE $WhereClause AND start_time >= '$DayFrom 00:00:00' AND end_time <= '$DayTo 23:59:59'"
     return [ordered]@{ bookingTotal = $bookingTotal; slotTotal = $slotTotal; scopeWindow = $window }
 }
 

@@ -427,10 +427,22 @@ OpenSpec apply progress: **24/34 tasks complete**
    `VALIDATED_SCAN_BLOCKS_RELEASE`, DB age 37.9h). The eight remediation files
    remain uncommitted in the worktree for their author; task 7.4 stays
    unchecked solely on OCR-12.
-4. Obtain JMeter plus owner-provided historical/fixture artifacts before any
-   concurrency execution. Never fabricate weakened migrations or mock results.
+4. DONE (2026-09-04, user-authorized self-provision): portable JMeter 5.6.3 ran
+   the REAL three rounds (baseline duplicates reproduced 0->11 rows on the
+   isolated no-unique-index stack; unique-index-only and protected rounds both
+   exactly 1/99/0 with exact row deltas) - report
+   `deploy/evidence/jmeter-concurrency-2026-09-04.md`, tasks 3.4 checked,
+   OCR-5/6/7 resolved. Two real harness defects were fixed first: count-query
+   backticks eaten by `sh -c` substitution, and `s=false` misread as transport
+   failure; the 45-assertion contract passes after both. No production data was
+   touched: rounds 1-2 ran on isolated stacks with their own volumes.
 5. DONE (2026-09-04, user decision 4): see item 2 — the T11 owner contract
    runner was merged, attested, and the lane executed end-to-end.
+5b. ADDED (2026-09-04, docs/06 acceptance): availability-cache before/after
+   evidence recorded via `deploy/evidence/cache-benchmark.py` +
+   `cache-benchmark-2026-09-04.md` (cold MISS 38.5ms avg vs warm HIT 28.2ms,
+   p50 39.7->17.1ms, 6 keys written, TTL 387s inside the deterministic
+   300-900s band; cache-key invalidation only, no data deletion).
 6. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
    evidence; rerun both strict OpenSpec validations and `git diff --check`.
 7. Sync/archive only after every required local gate is complete. External

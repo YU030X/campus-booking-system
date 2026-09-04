@@ -1,0 +1,50 @@
+# T13 JMeter isolated stack - PROTECTED round (unique index PRESENT).
+# Fully separate project + volume from the demo stack; loopback-only API.
+# Schema bootstrap: apply sql/V001..V005 via `docker compose exec -T mysql`.
+name: jmeter-baseline
+services:
+  mysql:
+    image: mysql:8.0.40
+    environment:
+      MYSQL_ROOT_PASSWORD: jmeter-iso-root
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pjmeter-iso-root"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7.4.9
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  api:
+    image: campus-booking/api:local
+    environment:
+      DB_URL: "jdbc:mysql://mysql:3306/booking_db?serverTimezone=Asia/Shanghai&characterEncoding=UTF-8"
+      DB_USERNAME: root
+      DB_PASSWORD: jmeter-iso-root
+      JWT_SECRET: jmeter-iso-jwt-secret-0123456789abcdef-0123456789
+      REDIS_ENABLED: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      BOOKING_REDIS_LOCK_DISABLED: "true"
+      BOOKING_CACHE_ENABLED: "false"
+      BOOKING_NOTIFICATIONS_ENABLED: "false"
+      BOOKING_STATISTICS_ENABLED: "false"
+      BOOKING_OPERATION_LOG_ENABLED: "false"
+    ports:
+      - "127.0.0.1:18081:8080"
+    networks: [backend, frontend]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+networks:
+  backend:
+    internal: true
+  frontend:

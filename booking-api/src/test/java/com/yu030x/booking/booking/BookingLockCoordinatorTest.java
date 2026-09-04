@@ -29,6 +29,7 @@ class BookingLockCoordinatorTest {
     private static final String KEY = "booking:lock:42:2026-08-26";
 
     private ObjectProvider<RedissonClient> clientProvider;
+    private ObjectProvider<com.yu030x.booking.common.config.RedisProperties> propertiesProvider;
     private RedissonClient redissonClient;
     private RLock lock;
     private BookingLockCoordinator coordinator;
@@ -37,11 +38,21 @@ class BookingLockCoordinatorTest {
     @SuppressWarnings("unchecked")
     void setUp() {
         clientProvider = mock(ObjectProvider.class);
+        propertiesProvider = mock(ObjectProvider.class);
+        when(propertiesProvider.getIfAvailable()).thenReturn(null);
         redissonClient = mock(RedissonClient.class);
         lock = mock(RLock.class);
         when(clientProvider.getIfAvailable()).thenReturn(redissonClient);
         when(redissonClient.getLock(KEY)).thenReturn(lock);
-        coordinator = new BookingLockCoordinator(clientProvider);
+        coordinator = new BookingLockCoordinator(clientProvider, propertiesProvider);
+    }
+
+    private ObjectProvider<com.yu030x.booking.common.config.RedisProperties> providerOf(
+            com.yu030x.booking.common.config.RedisProperties properties) {
+        ObjectProvider<com.yu030x.booking.common.config.RedisProperties> provider =
+                mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(properties);
+        return provider;
     }
 
     private final Supplier<String> action = () -> "ok";
@@ -108,6 +119,34 @@ class BookingLockCoordinatorTest {
                 () -> coordinator.withResourceDateLock(RESOURCE_ID, DATE, action));
 
         assertEquals(ErrorCode.BOOKING_ERROR, exception.errorCode);
+        assertEquals(BookingMessages.SYSTEM_BUSY, exception.getMessage());
+    }
+
+    @Test
+    void lockDisabledPropertyBypassesLockAndExecutesAction() throws Exception {
+        com.yu030x.booking.common.config.RedisProperties properties =
+                new com.yu030x.booking.common.config.RedisProperties();
+        properties.setLockDisabled(true);
+        BookingLockCoordinator bypassing =
+                new BookingLockCoordinator(clientProvider, providerOf(properties));
+
+        // Even with NO redisson client at all, the action runs: the database
+        // unique index is the correctness guarantee in this mode.
+        when(clientProvider.getIfAvailable()).thenReturn(null);
+
+        assertEquals("ok", bypassing.withResourceDateLock(RESOURCE_ID, DATE, action));
+        verify(redissonClient, never()).getLock(KEY);
+        verify(lock, never()).tryLock(3, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void defaultPropertiesKeepFailClosedBehaviorWithoutClient() {
+        BookingLockCoordinator legacy = new BookingLockCoordinator(clientProvider, providerOf(null));
+        when(clientProvider.getIfAvailable()).thenReturn(null);
+
+        BizException exception = assertThrows(BizException.class,
+                () -> legacy.withResourceDateLock(RESOURCE_ID, DATE, action));
+
         assertEquals(BookingMessages.SYSTEM_BUSY, exception.getMessage());
     }
 
