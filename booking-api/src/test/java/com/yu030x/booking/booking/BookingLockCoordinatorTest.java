@@ -112,6 +112,34 @@ class BookingLockCoordinatorTest {
     }
 
     @Test
+    void lockDisabledPropertyBypassesLockAndExecutesAction() throws Exception {
+        com.yu030x.booking.common.config.RedisProperties properties =
+                new com.yu030x.booking.common.config.RedisProperties();
+        properties.setLockDisabled(true);
+        BookingLockCoordinator bypassing =
+                new BookingLockCoordinator(clientProvider, properties);
+
+        // Even with NO redisson client at all, the action runs: the database
+        // unique index is the correctness guarantee in this mode.
+        when(clientProvider.getIfAvailable()).thenReturn(null);
+
+        assertEquals("ok", bypassing.withResourceDateLock(RESOURCE_ID, DATE, action));
+        verify(redissonClient, never()).getLock(KEY);
+        verify(lock, never()).tryLock(3, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void defaultPropertiesKeepFailClosedBehaviorWithoutClient() {
+        BookingLockCoordinator legacy = new BookingLockCoordinator(clientProvider, null);
+        when(clientProvider.getIfAvailable()).thenReturn(null);
+
+        BizException exception = assertThrows(BizException.class,
+                () -> legacy.withResourceDateLock(RESOURCE_ID, DATE, action));
+
+        assertEquals(BookingMessages.SYSTEM_BUSY, exception.getMessage());
+    }
+
+    @Test
     void unlockFailureDoesNotMaskActionResult() throws Exception {
         when(lock.tryLock(3, TimeUnit.SECONDS)).thenReturn(true);
         when(lock.isHeldByCurrentThread()).thenReturn(true);
