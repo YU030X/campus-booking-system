@@ -416,10 +416,17 @@ OpenSpec apply progress: **24/34 tasks complete**
    returned VALIDATED_SCAN_BLOCKS_RELEASE (aggregate 2 CRITICAL + 38 HIGH,
    base-image aging) with evidence `deploy/artifacts/t13-real-scan-20260903/`;
    the validator's UTC timestamp parsing defect was fixed (`Parse-Date`
-   RoundtripKind). The truthful FAIL bundle stands; release blocker is now a
-   base-image rebuild (an in-flight working-tree remediation bumping
-   eclipse-temurin 17.0.20 and nginx 1.30 with digest pinning was observed and
-   left uncommitted for its author).
+   RoundtripKind). The truthful FAIL bundle stands. The in-flight base bump
+   (temurin 17.0.20 + nginx 1.30, digest-pinned, verified in-image:
+   alpine 3.24.1/nginx 1.30.4/JDK 17.0.20) was adopted via the local ignored
+   `.env` (the old local pins had been silently overriding the remediated
+   defaults), rebuilt `--no-cache`, and rescanned on 2026-09-04: **edge 0/0**,
+   api OS clean — the remaining 37 HIGH/CRITICAL are application Java
+   dependencies (OCR-12, owner-scoped). Reproduction evidence:
+   `deploy/artifacts/t13-real-scan-20260904-rebuild/` (validator
+   `VALIDATED_SCAN_BLOCKS_RELEASE`, DB age 37.9h). The eight remediation files
+   remain uncommitted in the worktree for their author; task 7.4 stays
+   unchecked solely on OCR-12.
 4. Obtain JMeter plus owner-provided historical/fixture artifacts before any
    concurrency execution. Never fabricate weakened migrations or mock results.
 5. DONE (2026-09-04, user decision 4): see item 2 — the T11 owner contract
