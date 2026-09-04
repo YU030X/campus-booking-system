@@ -18,19 +18,22 @@ public class BookingLockCoordinator {
     static final long WAIT_SECONDS = 3L;
 
     private final ObjectProvider<RedissonClient> redissonClientProvider;
-    private final RedisProperties redisProperties;
+    private final ObjectProvider<RedisProperties> redisPropertiesProvider;
 
     public BookingLockCoordinator(ObjectProvider<RedissonClient> redissonClientProvider) {
         this(redissonClientProvider, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public BookingLockCoordinator(ObjectProvider<RedissonClient> redissonClientProvider, RedisProperties redisProperties) {
+    public BookingLockCoordinator(ObjectProvider<RedissonClient> redissonClientProvider,
+            ObjectProvider<RedisProperties> redisPropertiesProvider) {
         this.redissonClientProvider = redissonClientProvider;
-        this.redisProperties = redisProperties;
+        this.redisPropertiesProvider = redisPropertiesProvider;
     }
 
     public <T> T withResourceDateLock(long resourceId, LocalDate bookingDate, Supplier<T> action) {
+        RedisProperties redisProperties =
+                redisPropertiesProvider == null ? null : redisPropertiesProvider.getIfAvailable();
         if (redisProperties != null && redisProperties.isLockDisabled()) {
             // Unique-index-only mode: the database constraint alone defends slot
             // correctness; the Redis lock is skipped. Used only by the T13
