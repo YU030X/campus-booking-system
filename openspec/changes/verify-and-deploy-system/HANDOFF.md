@@ -438,6 +438,11 @@ OpenSpec apply progress: **24/34 tasks complete**
    touched: rounds 1-2 ran on isolated stacks with their own volumes.
 5. DONE (2026-09-04, user decision 4): see item 2 — the T11 owner contract
    runner was merged, attested, and the lane executed end-to-end.
+5b. ADDED (2026-09-04, docs/06 acceptance): availability-cache before/after
+   evidence recorded via `deploy/evidence/cache-benchmark.py` +
+   `cache-benchmark-2026-09-04.md` (cold MISS 38.5ms avg vs warm HIT 28.2ms,
+   p50 39.7->17.1ms, 6 keys written, TTL 387s inside the deterministic
+   300-900s band; cache-key invalidation only, no data deletion).
 6. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
    evidence; rerun both strict OpenSpec validations and `git diff --check`.
 7. Sync/archive only after every required local gate is complete. External
