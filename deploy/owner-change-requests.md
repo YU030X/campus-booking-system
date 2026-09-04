@@ -195,6 +195,15 @@ HIGH/CRITICAL pre-scans are 0/0, so these findings are not a base-image issue.
 
 Owner request:
 
+Independent reproduction (2026-09-04, this session): a fresh `--no-cache`
+rebuild after aligning the local ignored `deploy/.env` pins with the remediated
+defaults reproduced the exact 37 HIGH/CRITICAL rows (edge 0/0) — new evidence
+`deploy/artifacts/t13-real-scan-20260904-rebuild/` (validator
+`VALIDATED_SCAN_BLOCKS_RELEASE`, DB age 37.9h). Operational finding recorded:
+the ignored local `deploy/.env` was still pinning the OLD bases and silently
+overrode the remediated compose defaults; it now carries the same digest-pinned
+values. No pom/code was edited by T13.
+
 1. Select compatible patch/minor versions for the Java 17/Spring Boot 3.5
    contract (including the managed Jackson, Micrometer, Netty, Tomcat, Spring
    Boot/Data/Security/Core/Web artifacts) and record the compatibility rationale;
