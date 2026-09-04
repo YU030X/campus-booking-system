@@ -1,5 +1,6 @@
 package com.yu030x.booking.booking.service;
 
+import com.yu030x.booking.common.config.RedisProperties;
 import com.yu030x.booking.common.exception.BizException;
 import com.yu030x.booking.common.exception.ErrorCode;
 import java.time.LocalDate;
@@ -17,12 +18,25 @@ public class BookingLockCoordinator {
     static final long WAIT_SECONDS = 3L;
 
     private final ObjectProvider<RedissonClient> redissonClientProvider;
+    private final RedisProperties redisProperties;
 
     public BookingLockCoordinator(ObjectProvider<RedissonClient> redissonClientProvider) {
+        this(redissonClientProvider, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public BookingLockCoordinator(ObjectProvider<RedissonClient> redissonClientProvider, RedisProperties redisProperties) {
         this.redissonClientProvider = redissonClientProvider;
+        this.redisProperties = redisProperties;
     }
 
     public <T> T withResourceDateLock(long resourceId, LocalDate bookingDate, Supplier<T> action) {
+        if (redisProperties != null && redisProperties.isLockDisabled()) {
+            // Unique-index-only mode: the database constraint alone defends slot
+            // correctness; the Redis lock is skipped. Used only by the T13
+            // unique-index-only load round via BOOKING_REDIS_LOCK_DISABLED=true.
+            return action.get();
+        }
         RLock lock;
         try {
             lock = lock(resourceId, bookingDate);

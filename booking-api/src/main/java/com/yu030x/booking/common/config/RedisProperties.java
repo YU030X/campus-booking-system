@@ -19,6 +19,14 @@ import org.springframework.util.StringUtils;
 @Validated
 public class RedisProperties {
     private boolean enabled;
+    /**
+     * Testability gate for the T13 unique-index-only load round: when true, the
+     * booking lock layer is skipped so the database unique index alone defends
+     * slot correctness (the documented design: the lock is a performance
+     * optimization, the constraint is the guarantee). Defaults to false -
+     * production behavior is unchanged.
+     */
+    private boolean lockDisabled;
     private String host = "";
 
     @Min(value = 1, message = "booking.redis.port must be between 1 and 65535")
@@ -60,6 +68,14 @@ public class RedisProperties {
 
     public boolean isEnabled() {
         return enabled;
+    }
+
+    public boolean isLockDisabled() {
+        return lockDisabled;
+    }
+
+    public void setLockDisabled(boolean lockDisabled) {
+        this.lockDisabled = lockDisabled;
     }
 
     public void setEnabled(boolean enabled) {
