@@ -61,6 +61,8 @@ and 30 HIGH Java application-dependency findings, so `Validate` returns
 
 ## OCR-5 (T01/demo seed): fixture/token source undefined
 
+> **RESOLVED (2026-09-04, user-authorized self-provision): T13 authored the committed `deploy/jmeter/isolated-seed.sql` fixture seed + runtime rounds config; the protected rounds consumed it as a valid seed.**
+
 Lane D needs a runtime-injected student token and representative
 resource/slot fixture; demo orchestration depends on a T01-owned seed change
 or approved ephemeral fixture (tasks 6.1). Absent either, affected runs are
@@ -128,6 +130,8 @@ guardrail, not a remaining gap.
 
 ## OCR-6 (owner/T08 history): vulnerable-baseline image/artifact unavailable
 
+> **RESOLVED (2026-09-04, user-authorized): the historical vulnerable-baseline is now the ISOLATED jmeter stack (`deploy/jmeter/isolated-compose-baseline.yml` + `isolated-baseline-bootstrap.sql`) with the unique index dropped at the schema level - no historical image needed; declared in the round historyMirror.**
+
 The `vulnerable-baseline` round requires a runnable stack WITHOUT the
 `booking_slot` unique index (`uk_resource_slot`). No such image, compose file,
 or migration variant exists in this repo, and T13 must not create one by
@@ -137,6 +141,8 @@ the historical pre-index artifact in strict isolation. Blocked until then;
 `isolatedHistorical: true` and run.ps1 double-gates execution.
 
 ## OCR-7 (owner/T08/T09 history): unique-index-only artifact unverified
+
+> **RESOLVED (2026-09-04, user-authorized): unique-index-only behavior verified for real via R2 (1/99/0 PASS) on the isolated stack with the T07 lock-disable testability flag (default-off, unit+integration tested).**
 
 The `unique-index-only` round needs a historical image that HAS the unique
 index but predates the Redisson wiring. Which Redis semantics apply must be
