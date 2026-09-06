@@ -411,22 +411,23 @@ OpenSpec apply progress: **24/34 tasks complete**
    compose backend network is intentionally internal; the T08 harness gained
    optional Redis AUTH (`1b45208`). Known cosmetic: seeded purpose strings
    mojibake in the approval UI (owner-runner SQL-literal encoding).
-3. REAL SCAN EXECUTED (2026-09-04, user decision 3): portable Trivy 0.74.0 +
-   fresh advisory/Java DBs (ghcr) scanned both images offline; validator
-   returned VALIDATED_SCAN_BLOCKS_RELEASE (aggregate 2 CRITICAL + 38 HIGH,
-   base-image aging) with evidence `deploy/artifacts/t13-real-scan-20260903/`;
-   the validator's UTC timestamp parsing defect was fixed (`Parse-Date`
-   RoundtripKind). The truthful FAIL bundle stands. The in-flight base bump
-   (temurin 17.0.20 + nginx 1.30, digest-pinned, verified in-image:
-   alpine 3.24.1/nginx 1.30.4/JDK 17.0.20) was adopted via the local ignored
-   `.env` (the old local pins had been silently overriding the remediated
-   defaults), rebuilt `--no-cache`, and rescanned on 2026-09-04: **edge 0/0**,
-   api OS clean — the remaining 37 HIGH/CRITICAL are application Java
-   dependencies (OCR-12, owner-scoped). Reproduction evidence:
-   `deploy/artifacts/t13-real-scan-20260904-rebuild/` (validator
-   `VALIDATED_SCAN_BLOCKS_RELEASE`, DB age 37.9h). The eight remediation files
-   remain uncommitted in the worktree for their author; task 7.4 stays
-   unchecked solely on OCR-12.
+3. DONE (2026-09-05, OCR-12 closed): portable Trivy 0.74.0 + fresh advisory/
+   Java DBs scanned both FINAL images offline; validator returns
+   **VALIDATED_SCAN_PASS (exit 0)** - api 0 HIGH / 0 CRITICAL (91 low/medium),
+   edge 0 findings; evidence `deploy/artifacts/t13-real-scan-20260904-deps2/`.
+   The path to PASS: (a) adopted the base bump (temurin 17.0.20 + nginx 1.30,
+   digest-pinned; the local ignored `.env` had been silently overriding the
+   remediated defaults and was aligned); (b) OCR-12 resolved by the T07
+   dependency owner: Spring Boot BOM 3.5.4 -> 3.5.16 (`07bc815`) with
+   CVE-fixed overrides tomcat 10.1.59 / netty 4.1.136.Final (`657a9ec`);
+   full backend gate 389/0 on the refreshed BOM; stack re-verified healthy on
+   the final images with a live register smoke. The earlier FAIL bundles
+   (`t13-real-scan-20260903*`, `t13-real-scan-20260904*`) remain as the
+   truthful history of the findings. The eight remediation files
+   (compose/Dockerfiles/.env.example/README/scan-README/tls-overlay-check/
+   verification-matrix) are still uncommitted in the worktree for their
+   author, though the scan evidence above was produced from them.
+
 4. DONE (2026-09-04, user-authorized self-provision): portable JMeter 5.6.3 ran
    the REAL three rounds (baseline duplicates reproduced 0->11 rows on the
    isolated no-unique-index stack; unique-index-only and protected rounds both
@@ -443,6 +444,10 @@ OpenSpec apply progress: **24/34 tasks complete**
    `cache-benchmark-2026-09-04.md` (cold MISS 38.5ms avg vs warm HIT 28.2ms,
    p50 39.7->17.1ms, 6 keys written, TTL 387s inside the deterministic
    300-900s band; cache-key invalidation only, no data deletion).
+5b. SPEC SYNC DONE (2026-09-05): the five T13 capability deltas
+   (concurrency-performance-verification, data-recovery-runbook,
+   demo-orchestration, deployment-runtime, integration-e2e-verification)
+   merged into main specs; strict main-spec validation now 26/26.
 6. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
    evidence; rerun both strict OpenSpec validations and `git diff --check`.
 7. Sync/archive only after every required local gate is complete. External

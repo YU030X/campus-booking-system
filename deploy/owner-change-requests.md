@@ -43,6 +43,8 @@ is not misclassified as a missing integration proof.
 
 ## OCR-4 (build hygiene): runtime base tag→digest refresh
 
+> **RESOLVED (2026-09-05)**: runtime bases refreshed to digest-pinned eclipse-temurin 17.0.20_8 and nginx 1.30-alpine3.24 (verified in-image: alpine 3.24.1 / nginx 1.30.4 / JDK 17.0.20); digests recorded in `deploy/.env.example` and adopted in the local ignored `deploy/.env`.
+
 Status: PARTIALLY RESOLVED IN T13 — the runtime-base portion is complete; Java
 application dependencies remain a release blocker and are tracked by OCR-12.
 
@@ -187,6 +189,8 @@ for a new availability payload (`6e51a98`). The merged final run passed 15/15;
 this is a harness evidence fix, not a business/frontend source change.
 
 ## OCR-12 (T01/shared dependency owner): Java application dependency findings
+
+> **RESOLVED (2026-09-05)**: T07 dependency owner bumped Spring Boot BOM 3.5.4 -> 3.5.16 (`07bc815`) and added CVE-fixed overrides tomcat.version=10.1.59 / netty.version=4.1.136.Final (`657a9ec`); full backend gate 389/0 on the refreshed BOM; post-upgrade rescan: api 0 HIGH / 0 CRITICAL, edge 0 findings, validator `VALIDATED_SCAN_PASS` (evidence `deploy/artifacts/t13-real-scan-20260904-deps2/`). No blockers remain from this OCR.
 
 Status: OPEN — blocks T13 task 7.4 and release approval. T13 must not edit
 `booking-api/pom.xml`, shared dependency management, or business code.
