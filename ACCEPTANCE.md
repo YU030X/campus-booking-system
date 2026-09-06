@@ -123,7 +123,7 @@ docker rm -f acc-mysql acc-redis
 ```powershell
 # redis 转发侧车(backend 内网不给宿主端口,用 sidecar 暴露到 127.0.0.1:26379):
 docker create --name t08-redis-fwd -p 127.0.0.1:26379:16379 `
-  -v "$PWD\deploy\artifacts\t13-redis-fwd\nginx-stream.conf:/etc/nginx/nginx.conf:ro" `
+  -v "$PWD\deploy\redis-fwd\nginx-stream.conf:/etc/nginx/nginx.conf:ro" `
   nginxinc/nginx-unprivileged:1.27.4-alpine
 docker network connect campus-booking_frontend t08-redis-fwd
 docker network connect campus-booking_backend t08-redis-fwd
