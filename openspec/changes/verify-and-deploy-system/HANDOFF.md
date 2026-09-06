@@ -444,6 +444,10 @@ OpenSpec apply progress: **24/34 tasks complete**
    `cache-benchmark-2026-09-04.md` (cold MISS 38.5ms avg vs warm HIT 28.2ms,
    p50 39.7->17.1ms, 6 keys written, TTL 387s inside the deterministic
    300-900s band; cache-key invalidation only, no data deletion).
+5b. SPEC SYNC DONE (2026-09-05): the five T13 capability deltas
+   (concurrency-performance-verification, data-recovery-runbook,
+   demo-orchestration, deployment-runtime, integration-e2e-verification)
+   merged into main specs; strict main-spec validation now 26/26.
 6. Update `tasks.md`, `verification-matrix.md`, and this handoff only from real
    evidence; rerun both strict OpenSpec validations and `git diff --check`.
 7. Sync/archive only after every required local gate is complete. External
